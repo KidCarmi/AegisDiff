@@ -1,0 +1,15 @@
+diff --git a/app/models.py b/app/models.py
+index 1234567..abcdefg 100644
+--- a/app/models.py
++++ b/app/models.py
+@@ -1,6 +1,10 @@
+ from django.db import models
+
+ class User(models.Model):
+     name = models.CharField(max_length=100)
+     email = models.EmailField()
++    created_at = models.DateTimeField(auto_now_add=True)
++
++    @classmethod
++    def get_by_email(cls, email):
++        return cls.objects.filter(email=email).first()

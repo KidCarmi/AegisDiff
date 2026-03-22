@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AegisDiff — Zero-Cost AppSec Triage</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="header">
+    <div class="container">
+      <div class="nav">
+        <div class="logo">🛡️ AegisDiff</div>
+        <a href="#" class="btn btn-outline">Sign in with GitHub</a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- Hero -->
+    <section class="hero">
+      <div class="container hero-inner">
+        <div class="badge">Free forever · $0/month infrastructure</div>
+        <h1>Stop wasting time on<br /><span class="accent">false positives</span></h1>
+        <p class="hero-sub">
+          AegisDiff is an AI-powered security triage engine that automatically
+          analyzes every pull request for real vulnerabilities — and ignores the noise.
+          Powered by Gemini 1.5 Pro with Llama-3 fallback. Runs entirely inside
+          your GitHub Actions.
+        </p>
+        <div class="hero-cta">
+          <a href="#" class="btn btn-primary">Get Started Free →</a>
+          <a href="#how-it-works" class="btn btn-ghost">How it works</a>
+        </div>
+        <p class="hero-footnote">
+          ✓ Your code never leaves GitHub &nbsp;·&nbsp; ✓ No database for source code
+          &nbsp;·&nbsp; ✓ 60-second setup
+        </p>
+      </div>
+    </section>
+
+    <!-- Stats -->
+    <section class="stats">
+      <div class="container stats-grid">
+        <div class="stat">
+          <div class="stat-value">$0</div>
+          <div class="stat-label">Per month (free tiers)</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value">~90s</div>
+          <div class="stat-label">Per PR scan</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value">1M</div>
+          <div class="stat-label">Token context window</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value">2</div>
+          <div class="stat-label">AI providers (failover)</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- How it works -->
+    <section class="section" id="how-it-works">
+      <div class="container">
+        <h2 class="section-title">How it works</h2>
+        <div class="steps">
+          <div class="step">
+            <div class="step-num">1</div>
+            <h3>PR opened</h3>
+            <p>A developer opens a pull request. GitHub triggers the AegisDiff workflow.</p>
+          </div>
+          <div class="step-arrow">→</div>
+          <div class="step">
+            <div class="step-num">2</div>
+            <h3>Code analyzed</h3>
+            <p>AST parsing extracts sink→source data-flow paths from the diff — only the changed lines.</p>
+          </div>
+          <div class="step-arrow">→</div>
+          <div class="step">
+            <div class="step-num">3</div>
+            <h3>AI verdict</h3>
+            <p>Gemini 1.5 Pro (or Llama-3 fallback) acts as a cynical AppSec engineer and tries to <em>disprove</em> the vulnerability.</p>
+          </div>
+          <div class="step-arrow">→</div>
+          <div class="step">
+            <div class="step-num">4</div>
+            <h3>PR comment</h3>
+            <p>A clear verdict card is posted: TRUE_POSITIVE 🚨, FALSE_POSITIVE ✅, or NEEDS_REVIEW ⚠️.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- The Ghost Stack -->
+    <section class="section section-alt">
+      <div class="container">
+        <h2 class="section-title">The Ghost Stack — $0/month</h2>
+        <p class="section-sub">Every service used by AegisDiff has a free tier sufficient for production use.</p>
+        <div class="stack-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Layer</th>
+                <th>Service</th>
+                <th>Free Tier</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>Compute</td><td>GitHub Actions</td><td>Unlimited (public repos)</td></tr>
+              <tr><td>Primary AI</td><td>Google Gemini 1.5 Pro</td><td>1,500 req/day · 1M context</td></tr>
+              <tr><td>Fallback AI</td><td>Groq Llama-3-70b</td><td>14,400 req/day · fast LPU</td></tr>
+              <tr><td>Dashboard</td><td>Vercel (Next.js)</td><td>Unlimited deploys</td></tr>
+              <tr><td>Database</td><td>Neon PostgreSQL</td><td>0.5 GB · ~1.6M scans</td></tr>
+              <tr><td>Landing</td><td>Cloudflare Pages</td><td>Unlimited static hosting</td></tr>
+              <tr><td>Auth</td><td>GitHub OAuth</td><td>Free (NextAuth.js)</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Privacy -->
+    <section class="section">
+      <div class="container privacy-inner">
+        <div>
+          <h2 class="section-title" style="text-align:left">Zero code egress</h2>
+          <p>
+            AegisDiff runs entirely inside <strong>your</strong> GitHub Actions runner.
+            Your source code never leaves GitHub's infrastructure. We never see it,
+            store it, or transmit it. Only the verdict (metadata) is sent to the dashboard.
+          </p>
+          <ul class="privacy-list">
+            <li>✓ Engine runs in your GitHub Actions environment</li>
+            <li>✓ LLM API calls are made from your runner, using your own keys</li>
+            <li>✓ Only verdict metadata stored in our database (no code quotes)</li>
+            <li>✓ Evidence shown only in the GitHub PR comment — on GitHub's servers</li>
+          </ul>
+        </div>
+        <div class="privacy-diagram">
+          <pre>Your Repo
+    │
+    ▼
+GitHub Actions Runner
+(your environment)
+    │   analysis runs here
+    │
+    ├──▶ Gemini API (your key)
+    │
+    └──▶ AegisDiff Dashboard
+         (verdict only, no code)</pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="section section-cta">
+      <div class="container" style="text-align:center">
+        <h2>Ready to eliminate false positives?</h2>
+        <p>Set up in under 60 seconds. No credit card. No infrastructure to manage.</p>
+        <a href="#" class="btn btn-primary btn-lg">Start Free with GitHub →</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer-inner">
+      <span>🛡️ AegisDiff</span>
+      <div class="footer-links">
+        <a href="https://github.com/KidCarmi/AegisDiff">GitHub</a>
+        <a href="#privacy">Privacy</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

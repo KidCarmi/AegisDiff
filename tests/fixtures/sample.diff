@@ -1,0 +1,24 @@
+diff --git a/app/views.py b/app/views.py
+index 1234567..abcdefg 100644
+--- a/app/views.py
++++ b/app/views.py
+@@ -1,8 +1,14 @@
+ from django.http import HttpResponse
+ from django.db import connection
++import os
+
+ def get_user(request):
+-    user_id = 1
+-    cursor = connection.cursor()
+-    cursor.execute("SELECT * FROM users WHERE id = %s", [user_id])
+-    return HttpResponse("ok")
++    user_id = request.GET.get('id')
++    cursor = connection.cursor()
++    cursor.execute(f"SELECT * FROM users WHERE id = {user_id}")
++    row = cursor.fetchone()
++    return HttpResponse(str(row))
++
++def run_report(request):
++    report_name = request.GET.get('report', 'summary')
++    output = os.system(f"generate_report.sh {report_name}")
++    return HttpResponse(f"Report generated: {output}")

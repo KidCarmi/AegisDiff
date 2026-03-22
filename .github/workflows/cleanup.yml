@@ -1,0 +1,34 @@
+name: AegisDiff — DB Cleanup (90-day retention)
+
+on:
+  schedule:
+    - cron: "0 2 * * *"   # Daily at 2am UTC — free, no compute minutes used until triggered
+  workflow_dispatch: {}    # Allow manual trigger
+
+permissions:
+  contents: none           # No repo access needed
+
+jobs:
+  cleanup:
+    name: Purge old scan records
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - name: Trigger cleanup on Vercel
+        env:
+          AEGISDIFF_INGEST_URL: ${{ secrets.AEGISDIFF_INGEST_URL }}
+          AEGISDIFF_REPO_TOKEN: ${{ secrets.AEGISDIFF_REPO_TOKEN }}
+        run: |
+          if [ -z "$AEGISDIFF_INGEST_URL" ]; then
+            echo "No ingest URL configured — skipping cleanup"
+            exit 0
+          fi
+          # Derive cleanup URL from ingest URL
+          CLEANUP_URL="${AEGISDIFF_INGEST_URL%/ingest}/admin/cleanup"
+          curl -s -X POST "$CLEANUP_URL" \
+            -H "Authorization: Bearer $AEGISDIFF_REPO_TOKEN" \
+            -H "Content-Type: application/json" \
+            --fail \
+            && echo "Cleanup triggered successfully" \
+            || echo "Cleanup request failed (non-fatal)"
