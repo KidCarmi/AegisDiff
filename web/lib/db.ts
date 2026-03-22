@@ -20,12 +20,24 @@ export interface DbUser {
   created_at: string;
 }
 
+export interface DbInstallation {
+  id: number;
+  installation_id: number;
+  account_login: string;
+  account_type: string;
+  installed_by_github_id: number | null;
+  created_at: string;
+  deleted_at: string | null;
+}
+
 export interface DbRepo {
   id: number;
   user_id: number;
   owner: string;
   name: string;
   token_hash: string;
+  installation_id: number | null;
+  github_repo_id: number | null;
   created_at: string;
 }
 
@@ -56,12 +68,24 @@ CREATE TABLE IF NOT EXISTS users (
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS installations (
+  id                     SERIAL PRIMARY KEY,
+  installation_id        BIGINT UNIQUE NOT NULL,
+  account_login          TEXT NOT NULL,
+  account_type           TEXT NOT NULL,
+  installed_by_github_id BIGINT,
+  created_at             TIMESTAMPTZ DEFAULT NOW(),
+  deleted_at             TIMESTAMPTZ
+);
+
 CREATE TABLE IF NOT EXISTS repos (
   id              SERIAL PRIMARY KEY,
   user_id         INTEGER REFERENCES users(id) ON DELETE CASCADE,
   owner           TEXT NOT NULL,
   name            TEXT NOT NULL,
   token_hash      TEXT UNIQUE NOT NULL,
+  installation_id BIGINT REFERENCES installations(installation_id),
+  github_repo_id  BIGINT,
   created_at      TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE(owner, name)
 );
@@ -84,4 +108,5 @@ CREATE TABLE IF NOT EXISTS scans (
 
 CREATE INDEX IF NOT EXISTS scans_repo_id_idx ON scans(repo_id);
 CREATE INDEX IF NOT EXISTS scans_created_at_idx ON scans(created_at DESC);
+CREATE INDEX IF NOT EXISTS installations_account_idx ON installations(account_login);
 `;

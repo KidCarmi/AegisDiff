@@ -14,14 +14,55 @@ export async function GET(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const githubId = (session.user as any).githubId as number;
-  const rows = await sql`
-    SELECT r.id, r.owner, r.name, r.created_at AS "createdAt"
+  const accessToken = (session.user as any).accessToken as string;
+
+  // 1. Repos explicitly connected by this user (manual-token flow)
+  const ownedRows = await sql`
+    SELECT r.id, r.owner, r.name, r.created_at AS "createdAt",
+           r.installation_id IS NOT NULL AS "appInstalled"
     FROM repos r
     JOIN users u ON r.user_id = u.id
     WHERE u.github_id = ${githubId}
     ORDER BY r.created_at DESC
   `;
-  return NextResponse.json({ repos: rows });
+
+  // 2. Repos registered via GitHub App that the user has access to.
+  //    We verify GitHub API access to avoid leaking repos to wrong users.
+  const appRows = await sql`
+    SELECT r.id, r.owner, r.name, r.created_at AS "createdAt",
+           TRUE AS "appInstalled"
+    FROM repos r
+    WHERE r.installation_id IS NOT NULL
+      AND r.user_id IS NULL
+    ORDER BY r.created_at DESC
+    LIMIT 200
+  `;
+
+  // Filter app-installed repos to only those the signed-in user can see
+  const accessible: any[] = [];
+  for (const row of appRows as any[]) {
+    const resp = await fetch(
+      `https://api.github.com/repos/${row.owner}/${row.name}`,
+      {
+        headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/vnd.github+json" },
+        next: { revalidate: 300 },
+      }
+    );
+    if (resp.ok) accessible.push(row);
+  }
+
+  // Merge, deduplicate by owner/name (owned rows take precedence)
+  const seen = new Set<string>();
+  const merged: any[] = [];
+  for (const r of [...(ownedRows as any[]), ...accessible]) {
+    const key = `${r.owner}/${r.name}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      merged.push(r);
+    }
+  }
+
+  return NextResponse.json({ repos: merged });
 }
 
 export async function POST(req: NextRequest) {

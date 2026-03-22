@@ -84,6 +84,35 @@ export default async function DashboardPage() {
         ))}
       </div>
 
+      {/* GitHub App install banner — shown when user has no repos yet */}
+      {scans.length === 0 && (
+        <div className="mb-8 rounded-xl border border-blue-200 bg-blue-50 p-6">
+          <h2 className="text-base font-semibold text-blue-900">
+            Get started in 30 seconds
+          </h2>
+          <p className="mt-1 text-sm text-blue-700">
+            Install the AegisDiff GitHub App on your repos — no YAML, no secrets, zero config.
+            Every pull request is scanned automatically using our API keys.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <a
+              href={`https://github.com/apps/${process.env.NEXT_PUBLIC_GITHUB_APP_SLUG ?? "aegisdiff"}/installations/new`}
+              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Install on GitHub
+            </a>
+            <a
+              href="/repos"
+              className="inline-flex items-center gap-2 rounded-lg border border-blue-300 bg-white px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50"
+            >
+              Manual setup (bring your own keys)
+            </a>
+          </div>
+        </div>
+      )}
+
       {/* Recent scans */}
       <div>
         <h2 className="mb-4 text-lg font-semibold text-gray-800">Recent Scans</h2>
@@ -91,7 +120,8 @@ export default async function DashboardPage() {
           <div className="rounded-lg border border-dashed border-gray-300 p-12 text-center">
             <p className="text-gray-500">No scans yet.</p>
             <p className="mt-2 text-sm text-gray-400">
-              <a href="/repos" className="text-blue-600 hover:underline">Connect a repository</a>
+              Install the GitHub App above or{" "}
+              <a href="/repos" className="text-blue-600 hover:underline">connect a repository manually</a>
               {" "}to start analyzing pull requests.
             </p>
           </div>

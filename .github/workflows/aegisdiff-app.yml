@@ -1,0 +1,59 @@
+name: AegisDiff — GitHub App Analysis
+
+# Triggered by the Vercel webhook handler when a PR is opened/updated
+# on a repo where the AegisDiff GitHub App is installed.
+#
+# This workflow runs on OUR repo using OUR API keys — users supply
+# zero secrets.  Analysis results are posted back to their PR via
+# the GitHub App installation token.
+
+on:
+  repository_dispatch:
+    types: [analyze_pr]
+
+jobs:
+  analyze:
+    name: Triage PR diff
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout AegisDiff engine
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install engine + GitHub App dependencies
+        run: pip install -e ".[dev]" "PyJWT[cryptography]"
+
+      - name: Run triage engine
+        env:
+          # GitHub App credentials (our secrets — never user-supplied)
+          GITHUB_APP_ID:           ${{ secrets.GITHUB_APP_ID }}
+          GITHUB_APP_PRIVATE_KEY:  ${{ secrets.GITHUB_APP_PRIVATE_KEY }}
+
+          # LLM providers (our secrets)
+          GEMINI_API_KEY:          ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY:            ${{ secrets.GROQ_API_KEY }}
+
+          # Target PR context (passed from webhook via client_payload)
+          INSTALLATION_ID: ${{ github.event.client_payload.installation_id }}
+          TARGET_REPO:     ${{ github.event.client_payload.repo }}
+          PR_NUMBER:       ${{ github.event.client_payload.pr_number }}
+          COMMIT_SHA:      ${{ github.event.client_payload.head_sha }}
+
+          # Dashboard ingest (per-repo token forwarded from webhook)
+          AEGISDIFF_INGEST_URL:   ${{ github.event.client_payload.ingest_url }}
+          AEGISDIFF_INGEST_TOKEN: ${{ github.event.client_payload.ingest_token }}
+        run: python -m aegisdiff.app_entrypoint
+
+      - name: Write step summary
+        if: always()
+        run: |
+          if [ -f /tmp/step_summary.md ]; then
+            cat /tmp/step_summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
