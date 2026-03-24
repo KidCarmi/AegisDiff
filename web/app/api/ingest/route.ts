@@ -2,16 +2,44 @@
  * POST /api/ingest
  *
  * Receives scan metadata from GitHub Actions.
- * Authenticated via AEGISDIFF_REPO_TOKEN (per-repo Bearer token).
  * Stores only metadata — no code, no diffs, no evidence.
+ *
+ * Auth — two mechanisms accepted:
+ *
+ *   1. GitHub Actions OIDC JWT (zero-config, recommended)
+ *      CI requests a JWT from GitHub with audience "aegisdiff".
+ *      We verify it against GitHub's JWKS and extract the `repository`
+ *      claim to identify the repo.  No secrets required in the target repo.
+ *
+ *   2. Per-repo Bearer token (legacy / manual-connect repos)
+ *      SHA-256 hash of the token is compared against repos.token_hash.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "crypto";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 import { sql } from "../../../lib/db";
 import type { IngestPayload } from "../../../lib/types";
 
 const ALLOWED_VERDICTS = new Set(["TRUE_POSITIVE", "FALSE_POSITIVE", "NEEDS_REVIEW", "ERROR"]);
-const ALLOWED_SEVERITIES = new Set(["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO", "N/A", null, undefined]);
+
+const GITHUB_OIDC_ISSUER = "https://token.actions.githubusercontent.com";
+const GITHUB_JWKS = createRemoteJWKSet(
+  new URL(`${GITHUB_OIDC_ISSUER}/.well-known/jwks`),
+);
+
+/** Verify a GitHub Actions OIDC token. Returns "owner/name" or null. */
+async function verifyOIDC(token: string): Promise<string | null> {
+  try {
+    const { payload } = await jwtVerify(token, GITHUB_JWKS, {
+      issuer: GITHUB_OIDC_ISSUER,
+      audience: "aegisdiff",
+    });
+    const repo = payload["repository"] as string | undefined;
+    return repo ?? null;
+  } catch {
+    return null;
+  }
+}
 
 export async function POST(req: NextRequest) {
   // ── Auth ──────────────────────────────────────────────────────────────────
@@ -22,16 +50,47 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Missing authorization" }, { status: 401 });
   }
 
-  // Look up repo by hashed token
-  const tokenHash = createHash("sha256").update(token).digest("hex");
-  const repoRows = await sql`
-    SELECT id FROM repos WHERE token_hash = ${tokenHash} LIMIT 1
-  `;
+  let repoId: number;
 
-  if (repoRows.length === 0) {
-    return NextResponse.json({ error: "Invalid token" }, { status: 401 });
+  // Try OIDC first (GitHub Actions zero-config path)
+  const oidcRepo = await verifyOIDC(token);
+  if (oidcRepo) {
+    const [owner, name] = oidcRepo.split("/");
+    const rows = await sql`
+      SELECT id FROM repos WHERE owner = ${owner} AND name = ${name} LIMIT 1
+    `;
+    if (rows.length === 0) {
+      // Repo not connected yet — auto-register it if it has a GitHub App installation
+      const installRows = await sql`
+        SELECT i.id FROM installations i
+        WHERE i.account_login = ${owner} AND i.deleted_at IS NULL
+        LIMIT 1
+      `;
+      if (installRows.length === 0) {
+        return NextResponse.json({ error: "Repo not connected to AegisDiff" }, { status: 403 });
+      }
+      // Insert minimal repo row so scans can be stored
+      const inserted = await sql`
+        INSERT INTO repos (owner, name, token_hash)
+        VALUES (${owner}, ${name}, ${"oidc-" + createHash("sha256").update(oidcRepo).digest("hex")})
+        ON CONFLICT (owner, name) DO UPDATE SET owner = EXCLUDED.owner
+        RETURNING id
+      `;
+      repoId = (inserted[0] as any).id as number;
+    } else {
+      repoId = (rows[0] as any).id as number;
+    }
+  } else {
+    // Fall back to hashed per-repo token
+    const tokenHash = createHash("sha256").update(token).digest("hex");
+    const rows = await sql`
+      SELECT id FROM repos WHERE token_hash = ${tokenHash} LIMIT 1
+    `;
+    if (rows.length === 0) {
+      return NextResponse.json({ error: "Invalid token" }, { status: 401 });
+    }
+    repoId = (rows[0] as any).id as number;
   }
-  const repoId = (repoRows[0] as any).id as number;
 
   // ── Parse & validate payload ──────────────────────────────────────────────
   let payload: IngestPayload;

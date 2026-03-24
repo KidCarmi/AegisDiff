@@ -116,9 +116,9 @@ def main() -> None:
         print(comment_body)
 
     # Send metadata to dashboard (no code content)
-    if not cfg.aegisdiff_ingest_url or not cfg.aegisdiff_repo_token:
+    if not cfg.aegisdiff_ingest_url:
         logger.warning(
-            "Dashboard ingest skipped — AEGISDIFF_INGEST_URL or AEGISDIFF_REPO_TOKEN not set. "
+            "Dashboard ingest skipped — AEGISDIFF_INGEST_URL not set. "
             "Scan results will NOT appear in the dashboard."
         )
     if cfg.aegisdiff_ingest_url and cfg.aegisdiff_repo_token:

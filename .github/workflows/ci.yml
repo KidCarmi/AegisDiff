@@ -10,6 +10,7 @@ permissions:
   contents: read
   pull-requests: write
   issues: write
+  id-token: write   # Required for GitHub OIDC — lets CI auth to ingest without secrets
 
 jobs:
   # ── Job 1: unit tests + lint ──────────────────────────────────────────────
@@ -62,6 +63,15 @@ jobs:
       - name: Install AegisDiff
         run: pip install --quiet -e .[dev]
 
+      - name: Get OIDC token for ingest auth
+        id: oidc
+        run: |
+          OIDC_TOKEN=$(curl -s \
+            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=aegisdiff" \
+            | python3 -c "import sys,json; print(json.load(sys.stdin)['value'])")
+          echo "token=$OIDC_TOKEN" >> "$GITHUB_OUTPUT"
+
       - name: Run canary scan (sample.diff — known SQLi)
         continue-on-error: true   # Metric only — never blocks CI
         env:
@@ -73,7 +83,7 @@ jobs:
           REPO:                 ${{ github.repository }}
           DIFF_PATH:            tests/fixtures/sample.diff
           AEGISDIFF_INGEST_URL: ${{ secrets.AEGISDIFF_INGEST_URL }}
-          AEGISDIFF_REPO_TOKEN: ${{ secrets.AEGISDIFF_REPO_TOKEN }}
+          AEGISDIFF_REPO_TOKEN: ${{ steps.oidc.outputs.token }}
         run: python -m aegisdiff.entrypoint
 
       - name: Write step summary
@@ -133,6 +143,15 @@ jobs:
             echo "diff_lines=$(wc -l < /tmp/aegisdiff_pr.diff)" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Get OIDC token for ingest auth
+        id: oidc
+        run: |
+          OIDC_TOKEN=$(curl -s \
+            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=aegisdiff" \
+            | python3 -c "import sys,json; print(json.load(sys.stdin)['value'])")
+          echo "token=$OIDC_TOKEN" >> "$GITHUB_OUTPUT"
+
       - name: Run AegisDiff triage
         if: steps.diff.outputs.skip == 'false'
         continue-on-error: true   # Never block CI on triage failure
@@ -147,7 +166,7 @@ jobs:
           REPO:                  ${{ github.repository }}
           DIFF_PATH:             /tmp/aegisdiff_pr.diff
           AEGISDIFF_INGEST_URL:  ${{ secrets.AEGISDIFF_INGEST_URL }}
-          AEGISDIFF_REPO_TOKEN:  ${{ secrets.AEGISDIFF_REPO_TOKEN }}
+          AEGISDIFF_REPO_TOKEN:  ${{ steps.oidc.outputs.token }}
         run: python -m aegisdiff.entrypoint
 
       - name: Write step summary
