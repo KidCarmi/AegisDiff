@@ -10,6 +10,7 @@ when the same file/diff combination is re-analyzed (e.g., force-push
 with identical content).  If the Gist ID is not configured, all
 cache operations are silently no-ops.
 """
+
 from __future__ import annotations
 
 import hashlib

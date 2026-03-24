@@ -5,6 +5,7 @@ Reads environment variables, orchestrates the scan, posts the result
 as a PR comment, and optionally sends scan metadata to the dashboard
 ingest endpoint (no code content, metadata only).
 """
+
 from __future__ import annotations
 
 import logging
@@ -115,6 +116,11 @@ def main() -> None:
         print(comment_body)
 
     # Send metadata to dashboard (no code content)
+    if not cfg.aegisdiff_ingest_url or not cfg.aegisdiff_repo_token:
+        logger.warning(
+            "Dashboard ingest skipped — AEGISDIFF_INGEST_URL or AEGISDIFF_REPO_TOKEN not set. "
+            "Scan results will NOT appear in the dashboard."
+        )
     if cfg.aegisdiff_ingest_url and cfg.aegisdiff_repo_token:
         _send_to_ingest(
             cfg.aegisdiff_ingest_url,

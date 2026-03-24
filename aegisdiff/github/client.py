@@ -1,4 +1,5 @@
 """Thin GitHub REST API wrapper."""
+
 from __future__ import annotations
 
 import logging

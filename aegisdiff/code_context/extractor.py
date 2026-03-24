@@ -13,6 +13,7 @@ Strategy:
 
 Falls back to regex heuristics when tree-sitter is unavailable.
 """
+
 from __future__ import annotations
 
 import logging
@@ -68,9 +69,20 @@ PYTHON_SOURCE_PATTERNS: Dict[str, re.Pattern] = {
 
 # Sanitizer keywords: if any assignment edge contains these, mark as sanitized
 SANITIZER_KEYWORDS = [
-    "escape", "sanitize", "validate", "parameterize", "quote",
-    "htmlspecialchars", "bleach", "markupsafe", "encode", "strip_tags",
-    "prepared_statement", "bindparam", "literal_column", "text(",
+    "escape",
+    "sanitize",
+    "validate",
+    "parameterize",
+    "quote",
+    "htmlspecialchars",
+    "bleach",
+    "markupsafe",
+    "encode",
+    "strip_tags",
+    "prepared_statement",
+    "bindparam",
+    "literal_column",
+    "text(",
 ]
 
 # ORM/framework patterns that are safe by default (FALSE_POSITIVE hints)
@@ -133,9 +145,7 @@ class CodeContextExtractor:
     # Diff parsing
     # ------------------------------------------------------------------
 
-    def _parse_diff(
-        self, raw_diff: str
-    ) -> Tuple[List[str], Dict[str, List[range]]]:
+    def _parse_diff(self, raw_diff: str) -> Tuple[List[str], Dict[str, List[range]]]:
         """
         Parse a unified diff to extract changed files and the line ranges
         that were ADDED (not deleted) in each file.
@@ -314,9 +324,7 @@ class CodeContextExtractor:
                 )
         return edges
 
-    def _check_sanitizers(
-        self, edges: List[DataFlowEdge], source_code: str
-    ) -> bool:
+    def _check_sanitizers(self, edges: List[DataFlowEdge], source_code: str) -> bool:
         """Return True if any edge passes through a known sanitizer."""
         for edge in edges:
             combined = (edge.from_var + " " + edge.to_var).lower()
@@ -325,9 +333,7 @@ class CodeContextExtractor:
                     return True
         return False
 
-    def _describe_sanitizer(
-        self, edges: List[DataFlowEdge], source_code: str
-    ) -> str:
+    def _describe_sanitizer(self, edges: List[DataFlowEdge], source_code: str) -> str:
         for edge in edges:
             combined = (edge.from_var + " " + edge.to_var).lower()
             for kw in SANITIZER_KEYWORDS:
@@ -366,12 +372,10 @@ class CodeContextExtractor:
                 for ln in r:
                     for offset in range(-5, 6):
                         context_line_set.add(ln + offset)
-            relevant = sorted(
-                context_line_set & set(range(1, len(all_lines) + 1))
-            )[:max_lines_per_file]
-            snippet = "\n".join(
-                f"{ln:4d} | {all_lines[ln - 1]}" for ln in relevant
-            )
+            relevant = sorted(context_line_set & set(range(1, len(all_lines) + 1)))[
+                :max_lines_per_file
+            ]
+            snippet = "\n".join(f"{ln:4d} | {all_lines[ln - 1]}" for ln in relevant)
             contexts.append(f"--- {file_path} ---\n{snippet}")
         return "\n\n".join(contexts)
 
@@ -394,9 +398,7 @@ class CodeContextExtractor:
             logger.debug("tree-sitter loaded for %s", language)
             return parser
         except (ImportError, Exception) as e:
-            logger.info(
-                "tree-sitter not available (%s), using regex heuristics", e
-            )
+            logger.info("tree-sitter not available (%s), using regex heuristics", e)
             return None
 
     # ------------------------------------------------------------------

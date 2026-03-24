@@ -5,6 +5,7 @@ Uses a clean Markdown table with severity icons.
 The HTML marker <!-- aegisdiff-report --> is used for idempotent upsert.
 Evidence (code quotes) is placed in a <details> block to avoid wall-of-text.
 """
+
 from __future__ import annotations
 
 from ..triage.verdicts import Severity, Verdict, VerdictType
@@ -42,22 +43,16 @@ def format_verdict_comment(verdict: Verdict, pr_number: int, sha: str) -> str:
     )
 
     attack_section = (
-        f"\n**Attack Vector:** `{verdict.attack_vector}`"
-        if verdict.attack_vector
-        else ""
+        f"\n**Attack Vector:** `{verdict.attack_vector}`" if verdict.attack_vector else ""
     )
-    remediation_section = (
-        f"\n**Remediation:** {verdict.remediation}"
-        if verdict.remediation
-        else ""
-    )
+    remediation_section = f"\n**Remediation:** {verdict.remediation}" if verdict.remediation else ""
     fp_section = (
         f"\n**Why Not Exploitable:** {verdict.false_positive_reason}"
         if verdict.false_positive_reason
         else ""
     )
     evidence_block = (
-        f'\n<details><summary>Evidence</summary>\n\n```\n{verdict.evidence}\n```\n</details>'
+        f"\n<details><summary>Evidence</summary>\n\n```\n{verdict.evidence}\n```\n</details>"
         if verdict.evidence
         else ""
     )

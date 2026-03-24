@@ -5,6 +5,7 @@ Used by app_entrypoint.py (repository_dispatch mode) to authenticate
 as the installed GitHub App and fetch PR diffs without requiring a
 user-supplied GITHUB_TOKEN.
 """
+
 from __future__ import annotations
 
 import time
@@ -46,7 +47,7 @@ class GitHubAppClient:
 
         now = int(time.time())
         payload = {
-            "iat": now - 60,   # issued 60s ago to tolerate clock skew
+            "iat": now - 60,  # issued 60s ago to tolerate clock skew
             "exp": now + 540,  # expires in 9 minutes (10-min max)
             "iss": self._app_id,
         }

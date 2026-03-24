@@ -1,4 +1,5 @@
 """Google Gemini 1.5 Pro provider — primary LLM engine."""
+
 from __future__ import annotations
 
 import time
@@ -8,8 +9,7 @@ import httpx
 from .base import LLMProvider, LLMRequest, LLMResponse
 
 GEMINI_API_URL = (
-    "https://generativelanguage.googleapis.com/v1beta/models/"
-    "gemini-1.5-pro-latest:generateContent"
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent"
 )
 
 
@@ -46,9 +46,7 @@ class GeminiProvider(LLMProvider):
         except (KeyError, IndexError) as e:
             # Safety filter or unexpected response shape (e.g. finishReason=SAFETY)
             candidates = data.get("candidates")
-            finish = (
-                candidates[0].get("finishReason", "UNKNOWN") if candidates else "NO_CANDIDATES"
-            )
+            finish = candidates[0].get("finishReason", "UNKNOWN") if candidates else "NO_CANDIDATES"
             raise ValueError(f"Gemini response missing content (finishReason={finish})") from e
         usage = data.get("usageMetadata", {})
 

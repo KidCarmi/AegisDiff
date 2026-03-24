@@ -18,6 +18,7 @@ Environment variables (all passed by the workflow):
   AEGISDIFF_INGEST_URL      — dashboard ingest endpoint (passed via dispatch)
   AEGISDIFF_INGEST_TOKEN    — per-repo ingest token (passed via dispatch)
 """
+
 from __future__ import annotations
 
 import logging
@@ -93,15 +94,19 @@ def main() -> None:
     except ValueError as e:
         logger.error("Invalid integer environment variable: %s", e)
         sys.exit(1)
-    target_repo = _get_env("TARGET_REPO")         # "owner/name"
+    target_repo = _get_env("TARGET_REPO")  # "owner/name"
     commit_sha = _get_env("COMMIT_SHA")
 
     gemini_key = os.environ.get("GEMINI_API_KEY", "")
-    groq_keys = [k for k in [
-        os.environ.get("GROQ_API_KEY", ""),
-        os.environ.get("GROQ_API_KEY_2", ""),
-        os.environ.get("GROQ_API_KEY_3", ""),
-    ] if k]
+    groq_keys = [
+        k
+        for k in [
+            os.environ.get("GROQ_API_KEY", ""),
+            os.environ.get("GROQ_API_KEY_2", ""),
+            os.environ.get("GROQ_API_KEY_3", ""),
+        ]
+        if k
+    ]
     ingest_url = os.environ.get("AEGISDIFF_INGEST_URL", "")
     ingest_token = os.environ.get("AEGISDIFF_INGEST_TOKEN", "")
 

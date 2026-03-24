@@ -1,4 +1,5 @@
 """Groq (Llama-3-70b) provider — fallback LLM engine."""
+
 from __future__ import annotations
 
 import time

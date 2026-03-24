@@ -1,4 +1,5 @@
 """Data models for code context extraction."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -57,5 +58,5 @@ class CodeContext:
     diff_summary: str
     changed_files: List[str]
     paths: List[DataFlowPath]
-    raw_diff_snippet: str      # Actual +/- lines, capped at 200 lines
-    supporting_context: str    # ±5 lines of surrounding unchanged code
+    raw_diff_snippet: str  # Actual +/- lines, capped at 200 lines
+    supporting_context: str  # ±5 lines of surrounding unchanged code

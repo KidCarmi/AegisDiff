@@ -1,4 +1,5 @@
 """Verdict data model and JSON parser."""
+
 from __future__ import annotations
 
 import json

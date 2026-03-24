@@ -1,4 +1,5 @@
 """Environment variable loading and configuration constants."""
+
 from __future__ import annotations
 
 import os

@@ -4,6 +4,7 @@ Security Intent Prompt — The Cynical AppSec Engineer.
 This is the most critical piece of the system.
 The quality of every verdict depends on the calibration of this prompt.
 """
+
 from __future__ import annotations
 
 from ..code_context.models import CodeContext
@@ -93,10 +94,12 @@ def build_user_message(context: CodeContext) -> str:
             if path.is_sanitized
             else "[NO SANITIZER DETECTED]"
         )
-        edges_text = "\n".join(
-            f"  {e.line_number}: {e.from_var} → {e.to_var} ({e.operation})"
-            for e in path.edges
-        ) or "  (no intermediate assignments traced)"
+        edges_text = (
+            "\n".join(
+                f"  {e.line_number}: {e.from_var} → {e.to_var} ({e.operation})" for e in path.edges
+            )
+            or "  (no intermediate assignments traced)"
+        )
 
         paths_text += f"""
 DATA FLOW PATH {i}:

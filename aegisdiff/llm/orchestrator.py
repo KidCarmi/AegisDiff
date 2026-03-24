@@ -6,6 +6,7 @@ On retryable errors (429, timeout, 5xx): exponential backoff + jitter, up to max
 On non-retryable errors: immediately rotate to the next provider.
 If all providers are exhausted: raises RuntimeError.
 """
+
 from __future__ import annotations
 
 import logging
@@ -90,9 +91,7 @@ class LLMOrchestrator:
 
             logger.error("Provider %s exhausted — trying next", provider.name)
 
-        raise RuntimeError(
-            f"All LLM providers exhausted. Last error: {last_exc}"
-        ) from last_exc
+        raise RuntimeError(f"All LLM providers exhausted. Last error: {last_exc}") from last_exc
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -127,9 +126,7 @@ class LLMOrchestrator:
             prefix = user_msg[: code_start + len("<<<CODE>>>")]
             suffix = user_msg[code_end:]
             code_block = user_msg[code_start + len("<<<CODE>>>") : code_end]
-            truncated = (
-                code_block[:available] + "\n\n[...TRUNCATED — context limit reached...]"
-            )
+            truncated = code_block[:available] + "\n\n[...TRUNCATED — context limit reached...]"
             user_msg = prefix + truncated + suffix
             logger.warning(
                 "Context trimmed from ~%d → ~%d tokens for provider %s",
