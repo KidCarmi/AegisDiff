@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop, "claude/**"]
+  pull_request:
+    branches: [main, master, develop]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test & Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install --quiet -e .[dev]
+
+      - name: Lint (ruff)
+        run: ruff check aegisdiff/
+
+      - name: Format check (ruff)
+        run: ruff format --check aegisdiff/
+
+      - name: Run tests
+        run: pytest --tb=short -q
