@@ -5,7 +5,7 @@ import { sql } from "../../../lib/db";
 import { VerdictBadge } from "../../../components/VerdictBadge";
 import type { Scan } from "../../../lib/types";
 
-async function getScan(id: string, githubId: number): Promise<Scan | null> {
+async function getScan(id: string, githubId: number, username: string): Promise<Scan | null> {
   const rows = await sql`
     SELECT
       s.id,
@@ -24,9 +24,15 @@ async function getScan(id: string, githubId: number): Promise<Scan | null> {
       s.created_at   AS "createdAt"
     FROM scans s
     JOIN repos r ON s.repo_id = r.id
-    JOIN users u ON r.user_id = u.id
     WHERE s.id = ${id}
-      AND u.github_id = ${githubId}
+      AND (
+        r.id IN (
+          SELECT r2.id FROM repos r2
+          JOIN users u ON r2.user_id = u.id
+          WHERE u.github_id = ${githubId}
+        )
+        OR (r.installation_id IS NOT NULL AND r.owner = ${username})
+      )
     LIMIT 1
   `;
   return (rows[0] as unknown as Scan) ?? null;
@@ -41,7 +47,8 @@ export default async function ScanDetailPage({ params }: Props) {
   if (!session) redirect("/api/auth/signin");
 
   const githubId = (session.user as any).githubId as number;
-  const scan = await getScan(params.id, githubId);
+  const username = (session.user as any).username as string ?? session.user?.name ?? "";
+  const scan = await getScan(params.id, githubId, username);
   if (!scan) notFound();
 
   const sha = scan.commitSha.slice(0, 7);

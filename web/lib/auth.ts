@@ -48,6 +48,7 @@ export const authOptions: NextAuthOptions = {
       if (session.user && token.sub) {
         (session.user as any).githubId = token.githubId;
         (session.user as any).accessToken = token.accessToken;
+        (session.user as any).username = token.username;
       }
       return session;
     },
@@ -56,6 +57,7 @@ export const authOptions: NextAuthOptions = {
       if (account && profile) {
         token.githubId = (profile as any).id;
         token.accessToken = account.access_token;
+        token.username = (profile as any).login;
       }
       return token;
     },

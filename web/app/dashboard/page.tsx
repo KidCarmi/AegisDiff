@@ -5,7 +5,7 @@ import { sql } from "../../lib/db";
 import { ScanCard } from "../../components/ScanCard";
 import type { Scan } from "../../lib/types";
 
-async function getRecentScans(githubId: number): Promise<Scan[]> {
+async function getRecentScans(githubId: number, username: string): Promise<Scan[]> {
   const rows = await sql`
     SELECT
       s.id,
@@ -24,15 +24,20 @@ async function getRecentScans(githubId: number): Promise<Scan[]> {
       s.created_at   AS "createdAt"
     FROM scans s
     JOIN repos r ON s.repo_id = r.id
-    JOIN users u ON r.user_id = u.id
-    WHERE u.github_id = ${githubId}
+    WHERE
+      r.id IN (
+        SELECT r2.id FROM repos r2
+        JOIN users u ON r2.user_id = u.id
+        WHERE u.github_id = ${githubId}
+      )
+      OR (r.installation_id IS NOT NULL AND r.owner = ${username})
     ORDER BY s.created_at DESC
     LIMIT 50
   `;
   return rows as unknown as Scan[];
 }
 
-async function getScanStats(githubId: number) {
+async function getScanStats(githubId: number, username: string) {
   const rows = await sql`
     SELECT
       COUNT(*)                                           AS total,
@@ -41,11 +46,35 @@ async function getScanStats(githubId: number) {
       COUNT(*) FILTER (WHERE s.verdict = 'NEEDS_REVIEW')   AS needs_review
     FROM scans s
     JOIN repos r ON s.repo_id = r.id
-    JOIN users u ON r.user_id = u.id
-    WHERE u.github_id = ${githubId}
-      AND s.created_at > NOW() - INTERVAL '30 days'
+    WHERE (
+      r.id IN (
+        SELECT r2.id FROM repos r2
+        JOIN users u ON r2.user_id = u.id
+        WHERE u.github_id = ${githubId}
+      )
+      OR (r.installation_id IS NOT NULL AND r.owner = ${username})
+    )
+    AND s.created_at > NOW() - INTERVAL '30 days'
   `;
   return rows[0] as { total: string; true_positives: string; false_positives: string; needs_review: string };
+}
+
+/** Returns true if the user has at least one connected repo (owned or via GitHub App). */
+async function hasConnectedRepos(githubId: number, username: string): Promise<boolean> {
+  const owned = await sql`
+    SELECT 1 FROM repos r
+    JOIN users u ON r.user_id = u.id
+    WHERE u.github_id = ${githubId}
+    LIMIT 1
+  `;
+  if (owned.length > 0) return true;
+
+  const appInstalled = await sql`
+    SELECT 1 FROM installations
+    WHERE account_login = ${username} AND deleted_at IS NULL
+    LIMIT 1
+  `;
+  return appInstalled.length > 0;
 }
 
 export default async function DashboardPage() {
@@ -53,9 +82,12 @@ export default async function DashboardPage() {
   if (!session) redirect("/api/auth/signin");
 
   const githubId = (session.user as any).githubId as number;
-  const [scans, stats] = await Promise.all([
-    getRecentScans(githubId),
-    getScanStats(githubId),
+  const username = (session.user as any).username as string ?? session.user?.name ?? "";
+
+  const [scans, stats, connected] = await Promise.all([
+    getRecentScans(githubId, username),
+    getScanStats(githubId, username),
+    hasConnectedRepos(githubId, username),
   ]);
 
   const statCards = [
@@ -70,7 +102,7 @@ export default async function DashboardPage() {
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-gray-900">Security Dashboard</h1>
         <p className="mt-1 text-sm text-gray-500">
-          Last 30 days · {session.user?.name}
+          Last 30 days · {username || session.user?.name}
         </p>
       </div>
 
@@ -84,8 +116,8 @@ export default async function DashboardPage() {
         ))}
       </div>
 
-      {/* GitHub App install banner — shown when user has no repos yet */}
-      {scans.length === 0 && (
+      {/* GitHub App install banner — only shown when no repos are connected yet */}
+      {!connected && (
         <div className="mb-8 rounded-xl border border-blue-200 bg-blue-50 p-6">
           <h2 className="text-base font-semibold text-blue-900">
             Get started in 30 seconds
@@ -113,28 +145,39 @@ export default async function DashboardPage() {
         </div>
       )}
 
+      {/* Connected — show manage repos link */}
+      {connected && (
+        <div className="mb-6 flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-gray-800">Recent Scans</h2>
+          <a href="/repos" className="text-sm text-blue-600 hover:underline">
+            Manage repos →
+          </a>
+        </div>
+      )}
+
       {/* Recent scans */}
-      <div>
-        <h2 className="mb-4 text-lg font-semibold text-gray-800">Recent Scans</h2>
-        {scans.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-gray-300 p-12 text-center">
-            <p className="text-gray-500">No scans yet.</p>
-            <p className="mt-2 text-sm text-gray-400">
-              Install the GitHub App above or{" "}
-              <a href="/repos" className="text-blue-600 hover:underline">connect a repository manually</a>
-              {" "}to start analyzing pull requests.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {scans.map((scan) => (
-              <a key={scan.id} href={`/scans/${scan.id}`}>
-                <ScanCard scan={scan} />
-              </a>
-            ))}
-          </div>
-        )}
-      </div>
+      {!connected && <h2 className="mb-4 text-lg font-semibold text-gray-800">Recent Scans</h2>}
+      {scans.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-gray-300 p-12 text-center">
+          <p className="text-gray-500">No scans yet.</p>
+          <p className="mt-2 text-sm text-gray-400">
+            {connected
+              ? "Open a pull request on a connected repo to trigger the first scan."
+              : <>Install the GitHub App above or{" "}
+                <a href="/repos" className="text-blue-600 hover:underline">connect a repository manually</a>
+                {" "}to start analyzing pull requests.</>
+            }
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {scans.map((scan) => (
+            <a key={scan.id} href={`/scans/${scan.id}`}>
+              <ScanCard scan={scan} />
+            </a>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
