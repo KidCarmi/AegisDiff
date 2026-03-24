@@ -41,7 +41,12 @@ class GeminiProvider(LLMProvider):
         data = resp.json()
         latency = (time.monotonic() - t0) * 1000
 
-        content = data["candidates"][0]["content"]["parts"][0]["text"]
+        try:
+            content = data["candidates"][0]["content"]["parts"][0]["text"]
+        except (KeyError, IndexError) as e:
+            # Safety filter or unexpected response shape (e.g. finishReason=SAFETY)
+            finish = data.get("candidates", [{}])[0].get("finishReason", "UNKNOWN") if data.get("candidates") else "NO_CANDIDATES"
+            raise ValueError(f"Gemini response missing content (finishReason={finish})") from e
         usage = data.get("usageMetadata", {})
 
         return LLMResponse(

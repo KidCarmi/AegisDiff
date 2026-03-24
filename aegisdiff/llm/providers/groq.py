@@ -40,7 +40,10 @@ class GroqProvider(LLMProvider):
         data = resp.json()
         latency = (time.monotonic() - t0) * 1000
 
-        content = data["choices"][0]["message"]["content"]
+        try:
+            content = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError) as e:
+            raise ValueError(f"Groq response missing content: {data}") from e
         usage = data.get("usage", {})
 
         return LLMResponse(

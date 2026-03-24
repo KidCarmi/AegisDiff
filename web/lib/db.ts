@@ -109,4 +109,5 @@ CREATE TABLE IF NOT EXISTS scans (
 CREATE INDEX IF NOT EXISTS scans_repo_id_idx ON scans(repo_id);
 CREATE INDEX IF NOT EXISTS scans_created_at_idx ON scans(created_at DESC);
 CREATE INDEX IF NOT EXISTS installations_account_idx ON installations(account_login);
+CREATE INDEX IF NOT EXISTS repos_token_hash_idx ON repos(token_hash);
 `;

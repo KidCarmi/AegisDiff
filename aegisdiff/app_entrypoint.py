@@ -87,17 +87,25 @@ def main() -> None:
     app_id = _get_env("GITHUB_APP_ID")
     # Allow \\n-escaped newlines (common when storing PEM in env vars)
     private_key = _get_env("GITHUB_APP_PRIVATE_KEY").replace("\\n", "\n")
-    installation_id = int(_get_env("INSTALLATION_ID"))
+    try:
+        installation_id = int(_get_env("INSTALLATION_ID"))
+        pr_number = int(_get_env("PR_NUMBER"))
+    except ValueError as e:
+        logger.error("Invalid integer environment variable: %s", e)
+        sys.exit(1)
     target_repo = _get_env("TARGET_REPO")         # "owner/name"
-    pr_number = int(_get_env("PR_NUMBER"))
     commit_sha = _get_env("COMMIT_SHA")
 
     gemini_key = os.environ.get("GEMINI_API_KEY", "")
-    groq_key = os.environ.get("GROQ_API_KEY", "")
+    groq_keys = [k for k in [
+        os.environ.get("GROQ_API_KEY", ""),
+        os.environ.get("GROQ_API_KEY_2", ""),
+        os.environ.get("GROQ_API_KEY_3", ""),
+    ] if k]
     ingest_url = os.environ.get("AEGISDIFF_INGEST_URL", "")
     ingest_token = os.environ.get("AEGISDIFF_INGEST_TOKEN", "")
 
-    if not gemini_key and not groq_key:
+    if not gemini_key and not groq_keys:
         logger.error("No LLM API keys configured (GEMINI_API_KEY / GROQ_API_KEY)")
         sys.exit(1)
 
@@ -117,10 +125,10 @@ def main() -> None:
     providers = []
     if gemini_key:
         providers.append(GeminiProvider(gemini_key))
-        logger.info("Primary provider: Gemini")
-    if groq_key:
-        providers.append(GroqProvider(groq_key))
-        logger.info("Fallback provider: Groq")
+        logger.info("Provider: Gemini")
+    for i, key in enumerate(groq_keys, start=1):
+        providers.append(GroqProvider(key))
+        logger.info("Provider: Groq (key %d/%d)", i, len(groq_keys))
 
     orchestrator = LLMOrchestrator(providers, max_retries_per_provider=3)
     engine = TriageEngine(orchestrator, repo_root=Path("."))

@@ -22,7 +22,11 @@ export async function GET(req: NextRequest) {
 
   let rows;
   if (repoFilter) {
-    const [owner, name] = repoFilter.split("/");
+    const parts = repoFilter.split("/");
+    if (parts.length !== 2 || !parts[0] || !parts[1]) {
+      return NextResponse.json({ error: "Invalid repo filter — expected owner/name" }, { status: 400 });
+    }
+    const [owner, name] = parts;
     rows = await sql`
       SELECT
         s.id,

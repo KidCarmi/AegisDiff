@@ -71,7 +71,7 @@ jobs:
           fi
 
           # Only diff source code files
-          git diff "${BASE_SHA}...${HEAD_SHA}" \
+          timeout 60 git diff "${BASE_SHA}...${HEAD_SHA}" \
             -- "*.py" "*.js" "*.ts" "*.tsx" "*.jsx" "*.go" "*.java" "*.rb" "*.php" \
             > /tmp/aegisdiff_pr.diff 2>/dev/null || true
 

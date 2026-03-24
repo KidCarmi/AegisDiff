@@ -61,10 +61,16 @@ class GitHubClient:
 
     def _create_comment(self, pr_number: int, body: str) -> None:
         url = f"{GITHUB_API_BASE}/repos/{self._repo}/issues/{pr_number}/comments"
-        resp = httpx.post(url, headers=self._headers, json={"body": body}, timeout=15.0)
-        resp.raise_for_status()
+        try:
+            resp = httpx.post(url, headers=self._headers, json={"body": body}, timeout=15.0)
+            resp.raise_for_status()
+        except httpx.HTTPError as e:
+            logger.warning("Failed to create PR comment: %s", e)
 
     def _update_comment(self, comment_id: int, body: str) -> None:
         url = f"{GITHUB_API_BASE}/repos/{self._repo}/issues/comments/{comment_id}"
-        resp = httpx.patch(url, headers=self._headers, json={"body": body}, timeout=15.0)
-        resp.raise_for_status()
+        try:
+            resp = httpx.patch(url, headers=self._headers, json={"body": body}, timeout=15.0)
+            resp.raise_for_status()
+        except httpx.HTTPError as e:
+            logger.warning("Failed to update PR comment #%d: %s", comment_id, e)

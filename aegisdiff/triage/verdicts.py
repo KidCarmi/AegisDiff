@@ -102,9 +102,11 @@ def parse_verdict(llm_output: str, provider: str = "unknown") -> Verdict:
 
         # Enforce calibration rules from the system prompt
         raw_verdict = data.get("verdict", "ERROR")
-        confidence = float(data.get("confidence", 0.0))
+        # Clamp confidence to [0, 1] — LLMs can hallucinate out-of-range values
+        raw_confidence = data.get("confidence", 0.0)
+        confidence = max(0.0, min(1.0, float(raw_confidence))) if isinstance(raw_confidence, (int, float)) and not (raw_confidence != raw_confidence) else 0.0  # noqa: PLR0124
 
-        # If confidence is too low, downgrade TRUE_POSITIVE to NEEDS_REVIEW
+        # Rule 1: TRUE_POSITIVE requires confidence >= 0.7
         if raw_verdict == "TRUE_POSITIVE" and confidence < 0.7:
             logger.warning(
                 "Downgrading TRUE_POSITIVE to NEEDS_REVIEW: confidence %.2f < 0.7",
@@ -112,6 +114,8 @@ def parse_verdict(llm_output: str, provider: str = "unknown") -> Verdict:
             )
             raw_verdict = "NEEDS_REVIEW"
 
+        # Rule 2: confidence < 0.5 forces NEEDS_REVIEW (applies to current verdict,
+        # including any already-downgraded value from rule 1)
         if confidence < 0.5 and raw_verdict in ("TRUE_POSITIVE", "FALSE_POSITIVE"):
             logger.warning(
                 "Downgrading %s to NEEDS_REVIEW: confidence %.2f < 0.5",
@@ -138,8 +142,8 @@ def parse_verdict(llm_output: str, provider: str = "unknown") -> Verdict:
 
     except (json.JSONDecodeError, ValueError, KeyError) as e:
         logger.error(
-            "Failed to parse LLM verdict JSON: %s\nRaw output (first 500 chars): %s",
+            "Failed to parse LLM verdict JSON: %s (output length: %d chars)",
             e,
-            llm_output[:500],
+            len(llm_output),
         )
         return Verdict.error(f"JSON parse failure: {e}")

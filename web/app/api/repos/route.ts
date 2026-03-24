@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
       `https://api.github.com/repos/${row.owner}/${row.name}`,
       {
         headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/vnd.github+json" },
-        next: { revalidate: 300 },
+        cache: "no-store",
       }
     );
     if (resp.ok) accessible.push(row);

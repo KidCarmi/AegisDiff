@@ -49,9 +49,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Missing commit_sha" }, { status: 400 });
   }
 
-  // Sanitize: confidence must be 0-1
+  // Sanitize: confidence must be a finite number in [0, 1]
   const confidence =
-    typeof payload.confidence === "number"
+    typeof payload.confidence === "number" && isFinite(payload.confidence)
       ? Math.max(0, Math.min(1, payload.confidence))
       : null;
 

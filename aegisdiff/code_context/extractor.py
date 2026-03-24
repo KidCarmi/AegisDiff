@@ -160,7 +160,9 @@ class CodeContextExtractor:
                     changed_lines[current_file].append(
                         range(current_new_line, current_new_line + 1)
                     )
-                current_new_line += 1
+                    current_new_line += 1
+                else:
+                    logger.warning("Encountered added line before any file header — skipping")
             elif not line.startswith("-"):
                 current_new_line += 1
 
