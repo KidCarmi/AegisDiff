@@ -1,10 +1,8 @@
 /**
  * Next.js instrumentation hook — runs once on server startup (every cold start).
- * Used to apply idempotent schema migrations so the DB is always in sync
- * without any manual steps after deploy.
+ * Applies all schema migrations idempotently so the DB stays in sync after deploys.
  */
 export async function register() {
-  // Only run in Node.js runtime (not edge)
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
   if (!process.env.DATABASE_URL) return;
 
@@ -12,8 +10,7 @@ export async function register() {
     const { neon } = await import("@neondatabase/serverless");
     const sql = neon(process.env.DATABASE_URL);
 
-    // Each statement is idempotent — safe to run on every cold start.
-    // Order matters: create tables before adding FK columns.
+    // ── Core tables (Phase 0) ─────────────────────────────────────────────
     await sql`
       CREATE TABLE IF NOT EXISTS installations (
         id                     SERIAL PRIMARY KEY,
@@ -23,18 +20,68 @@ export async function register() {
         installed_by_github_id BIGINT,
         created_at             TIMESTAMPTZ DEFAULT NOW(),
         deleted_at             TIMESTAMPTZ
-      )
-    `;
+      )`;
 
-    await sql`ALTER TABLE repos ADD COLUMN IF NOT EXISTS installation_id BIGINT`;
-    await sql`ALTER TABLE repos ADD COLUMN IF NOT EXISTS github_repo_id  BIGINT`;
-    await sql`ALTER TABLE repos ADD COLUMN IF NOT EXISTS slack_webhook_url TEXT`;
+    // ── repos columns ─────────────────────────────────────────────────────
+    await sql`ALTER TABLE repos ADD COLUMN IF NOT EXISTS installation_id    BIGINT`;
+    await sql`ALTER TABLE repos ADD COLUMN IF NOT EXISTS github_repo_id     BIGINT`;
+    await sql`ALTER TABLE repos ADD COLUMN IF NOT EXISTS slack_webhook_url  TEXT`;
+
+    // ── Phase 1: Discord + Teams + notification thresholds ────────────────
+    await sql`ALTER TABLE repos ADD COLUMN IF NOT EXISTS discord_webhook_url    TEXT`;
+    await sql`ALTER TABLE repos ADD COLUMN IF NOT EXISTS teams_webhook_url      TEXT`;
+    await sql`ALTER TABLE repos ADD COLUMN IF NOT EXISTS notify_min_severity    TEXT DEFAULT 'INFO'`;
+    await sql`ALTER TABLE repos ADD COLUMN IF NOT EXISTS notify_on_needs_review BOOLEAN DEFAULT FALSE`;
+
+    // ── Phase 2: GitHub Issues auto-create ────────────────────────────────
+    await sql`ALTER TABLE repos ADD COLUMN IF NOT EXISTS auto_github_issue BOOLEAN DEFAULT FALSE`;
+
+    // ── users columns ─────────────────────────────────────────────────────
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS scan_retention_days INTEGER DEFAULT 30`;
 
+    // ── Phase 4: API keys ─────────────────────────────────────────────────
+    await sql`
+      CREATE TABLE IF NOT EXISTS api_keys (
+        id          SERIAL PRIMARY KEY,
+        github_id   BIGINT NOT NULL,
+        key_hash    TEXT UNIQUE NOT NULL,
+        key_prefix  TEXT NOT NULL,
+        created_at  TIMESTAMPTZ DEFAULT NOW(),
+        revoked_at  TIMESTAMPTZ
+      )`;
+
+    // ── Phase 5: Ignore rules ─────────────────────────────────────────────
+    await sql`
+      CREATE TABLE IF NOT EXISTS ignore_rules (
+        id            SERIAL PRIMARY KEY,
+        repo_id       INTEGER REFERENCES repos(id) ON DELETE CASCADE,
+        cwe_id        TEXT,
+        title_keyword TEXT,
+        reason        TEXT,
+        created_at    TIMESTAMPTZ DEFAULT NOW()
+      )`;
+
+    // ── Phase 5: Audit log ────────────────────────────────────────────────
+    await sql`
+      CREATE TABLE IF NOT EXISTS audit_log (
+        id          SERIAL PRIMARY KEY,
+        github_id   BIGINT NOT NULL,
+        action      TEXT NOT NULL,
+        repo_owner  TEXT,
+        repo_name   TEXT,
+        details     JSONB,
+        ip_hash     TEXT,
+        created_at  TIMESTAMPTZ DEFAULT NOW()
+      )`;
+
+    // ── Indexes ───────────────────────────────────────────────────────────
     await sql`CREATE INDEX IF NOT EXISTS installations_account_idx ON installations(account_login)`;
-    await sql`CREATE INDEX IF NOT EXISTS repos_token_hash_idx ON repos(token_hash)`;
+    await sql`CREATE INDEX IF NOT EXISTS repos_token_hash_idx      ON repos(token_hash)`;
+    await sql`CREATE INDEX IF NOT EXISTS api_keys_github_idx        ON api_keys(github_id)`;
+    await sql`CREATE INDEX IF NOT EXISTS audit_log_github_idx       ON audit_log(github_id, created_at DESC)`;
+    await sql`CREATE INDEX IF NOT EXISTS ignore_rules_repo_idx      ON ignore_rules(repo_id)`;
+
   } catch (err) {
-    // Don't crash the server — log and continue
     console.warn("[migrate] Schema migration error (non-fatal):", err);
   }
 }

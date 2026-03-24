@@ -10,39 +10,53 @@ interface RepoRow {
   name: string;
   createdAt: string;
   appInstalled: boolean;
+  totalScans: string;
+  truePositives: string;
+  lastScanAt: string | null;
+}
+
+/** Security score 0–100: penalises TPs, rewards clean scans. */
+function securityScore(total: number, tp: number): number | null {
+  if (total === 0) return null;
+  const tpRate = tp / total;
+  return Math.max(0, Math.round(100 - tpRate * 100));
+}
+
+function scoreColor(score: number) {
+  if (score >= 80) return "text-green-600";
+  if (score >= 50) return "text-yellow-600";
+  return "text-red-600";
 }
 
 async function getRepos(githubId: number, username: string): Promise<RepoRow[]> {
-  // Manually connected repos
   const owned = await sql`
     SELECT r.id, r.owner, r.name, r.created_at AS "createdAt",
-           (r.installation_id IS NOT NULL) AS "appInstalled"
+           (r.installation_id IS NOT NULL) AS "appInstalled",
+           COUNT(s.id)::text AS "totalScans",
+           COUNT(s.id) FILTER (WHERE s.verdict = 'TRUE_POSITIVE')::text AS "truePositives",
+           MAX(s.created_at)::text AS "lastScanAt"
     FROM repos r
     JOIN users u ON r.user_id = u.id
+    LEFT JOIN scans s ON s.repo_id = r.id AND s.created_at > NOW() - INTERVAL '30 days'
     WHERE u.github_id = ${githubId}
-    ORDER BY r.created_at DESC
-  `;
+    GROUP BY r.id ORDER BY r.created_at DESC`;
 
-  // GitHub App installed repos (user_id is NULL — matched by account_login)
   const appRepos = await sql`
     SELECT r.id, r.owner, r.name, r.created_at AS "createdAt",
-           TRUE AS "appInstalled"
+           TRUE AS "appInstalled",
+           COUNT(s.id)::text AS "totalScans",
+           COUNT(s.id) FILTER (WHERE s.verdict = 'TRUE_POSITIVE')::text AS "truePositives",
+           MAX(s.created_at)::text AS "lastScanAt"
     FROM repos r
-    WHERE r.installation_id IS NOT NULL
-      AND r.user_id IS NULL
-      AND r.owner = ${username}
-    ORDER BY r.created_at DESC
-  `;
+    LEFT JOIN scans s ON s.repo_id = r.id AND s.created_at > NOW() - INTERVAL '30 days'
+    WHERE r.installation_id IS NOT NULL AND r.user_id IS NULL AND r.owner = ${username}
+    GROUP BY r.id ORDER BY r.created_at DESC`;
 
-  // Merge, deduplicate
   const seen = new Set<string>();
   const merged: RepoRow[] = [];
   for (const r of [...(owned as any[]), ...(appRepos as any[])]) {
     const key = `${r.owner}/${r.name}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      merged.push(r as RepoRow);
-    }
+    if (!seen.has(key)) { seen.add(key); merged.push(r as RepoRow); }
   }
   return merged;
 }
@@ -60,21 +74,16 @@ export default async function ReposPage() {
 
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex items-center justify-between flex-wrap gap-3">
         <h1 className="text-2xl font-bold text-gray-900">Connected Repositories</h1>
         <div className="flex gap-2">
-          <a
-            href={`https://github.com/apps/${appSlug}/installations/new`}
-            target="_blank"
+          <a href={`https://github.com/apps/${appSlug}/installations/new`} target="_blank"
             rel="noopener noreferrer"
-            className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-          >
+            className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
             + Install GitHub App
           </a>
-          <a
-            href="/repos/connect"
-            className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
-          >
+          <a href="/repos/connect"
+            className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700">
             + Manual Connect
           </a>
         </div>
@@ -87,81 +96,75 @@ export default async function ReposPage() {
             Install the GitHub App for zero-config setup, or connect manually with your own API keys.
           </p>
           <div className="flex justify-center gap-3">
-            <a
-              href={`https://github.com/apps/${appSlug}/installations/new`}
-              target="_blank"
+            <a href={`https://github.com/apps/${appSlug}/installations/new`} target="_blank"
               rel="noopener noreferrer"
-              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-            >
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
               Install GitHub App (recommended)
             </a>
-            <a
-              href="/repos/connect"
-              className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-            >
+            <a href="/repos/connect"
+              className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
               Manual setup
             </a>
           </div>
         </div>
       ) : (
         <div className="space-y-3">
-          {repos.map((repo) => (
-            <div
-              key={repo.id}
-              className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm"
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono font-medium text-gray-900">
+          {repos.map((repo) => {
+            const total = parseInt(repo.totalScans, 10);
+            const tp = parseInt(repo.truePositives, 10);
+            const score = securityScore(total, tp);
+            return (
+              <div key={repo.id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm hover:shadow-md transition-shadow">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <a href={`/repos/${repo.owner}/${repo.name}`}
+                        className="font-mono font-semibold text-gray-900 hover:text-blue-600 truncate">
                         {repo.owner}/{repo.name}
-                      </span>
+                      </a>
                       {repo.appInstalled ? (
-                        <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-700/10">
+                        <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-700/10">
                           GitHub App
                         </span>
                       ) : (
-                        <span className="inline-flex items-center rounded-full bg-gray-50 px-2 py-0.5 text-xs font-medium text-gray-600 ring-1 ring-inset ring-gray-500/10">
+                        <span className="rounded-full bg-gray-50 px-2 py-0.5 text-xs font-medium text-gray-600 ring-1 ring-inset ring-gray-500/10">
                           Manual
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      Connected {new Date(repo.createdAt).toLocaleDateString()}
-                    </p>
+                    <div className="flex items-center gap-3 mt-1 text-xs text-gray-400 flex-wrap">
+                      <span>Connected {new Date(repo.createdAt).toLocaleDateString()}</span>
+                      {total > 0 && <span>{total} scans (30d)</span>}
+                      {tp > 0 && <span className="text-red-500">{tp} issue{tp !== 1 ? "s" : ""}</span>}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-4 ml-4 shrink-0">
+                    {/* Security score */}
+                    {score !== null && (
+                      <div className="text-center">
+                        <div className={`text-xl font-bold ${scoreColor(score)}`}>{score}</div>
+                        <div className="text-[10px] text-gray-400">score</div>
+                      </div>
+                    )}
+                    <div className="flex gap-2 text-xs">
+                      <a href={`https://github.com/${repo.owner}/${repo.name}`}
+                        target="_blank" rel="noopener noreferrer"
+                        className="text-gray-400 hover:text-gray-700">GitHub ↗</a>
+                      <a href={`/repos/${repo.owner}/${repo.name}`}
+                        className="text-blue-600 hover:underline">Details →</a>
+                    </div>
                   </div>
                 </div>
-                <div className="flex gap-3 items-center">
-                  <a
-                    href={`https://github.com/${repo.owner}/${repo.name}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs text-gray-400 hover:text-gray-700"
-                  >
-                    GitHub ↗
-                  </a>
-                  <a
-                    href={`/dashboard?repo=${repo.owner}/${repo.name}`}
-                    className="text-xs text-blue-600 hover:underline"
-                  >
-                    View scans
-                  </a>
-                </div>
+                <RepoSetup owner={repo.owner} name={repo.name} ingestUrl={ingestUrl} />
               </div>
-              <RepoSetup
-                owner={repo.owner}
-                name={repo.name}
-                ingestUrl={ingestUrl}
-              />
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
-
       {repos.length > 0 && (
         <p className="mt-4 text-xs text-gray-400">
-          To add more repositories, click <strong>+ Install GitHub App</strong> and select additional repos.
+          Security score = 100 − TP rate over last 30 days. Click any repo for full details.
         </p>
       )}
     </div>

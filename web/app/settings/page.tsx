@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { authOptions } from "../../lib/auth";
 import { sql } from "../../lib/db";
 import { SettingsForm } from "./SettingsForm";
+import { ApiKeySection } from "./ApiKeySection";
 
 export default async function SettingsPage() {
   const session = await getServerSession(authOptions);
@@ -123,6 +124,36 @@ export default async function SettingsPage() {
                 </div>
               );
             })}
+          </div>
+        )}
+      </section>
+
+      {/* REST API */}
+      <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+        <h2 className="text-lg font-semibold text-gray-800 mb-1">REST API</h2>
+        <p className="text-sm text-gray-500 mb-4">
+          Query your scan data programmatically with a personal API key.
+        </p>
+        <ApiKeySection />
+      </section>
+
+      {/* SARIF export note */}
+      <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+        <h2 className="text-lg font-semibold text-gray-800 mb-1">SARIF Export</h2>
+        <p className="text-sm text-gray-500 mb-3">
+          Download scan results in SARIF 2.1.0 format — compatible with GitHub Code Scanning,
+          VS Code SARIF Viewer, and most security tooling.
+        </p>
+        {(repoRows as any[]).length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {(repoRows as any[]).map((r) => (
+              <a key={`${r.owner}/${r.name}`}
+                href={`/api/scans/export?repo=${r.owner}/${r.name}&format=sarif`}
+                className="rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                download>
+                {r.owner}/{r.name} ↓ SARIF
+              </a>
+            ))}
           </div>
         )}
       </section>
