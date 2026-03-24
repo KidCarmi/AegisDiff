@@ -26,6 +26,7 @@ const securityHeaders = [
 const nextConfig = {
   experimental: {
     serverComponentsExternalPackages: ["@neondatabase/serverless"],
+    instrumentationHook: true,
   },
   async headers() {
     return [
