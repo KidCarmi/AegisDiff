@@ -110,4 +110,8 @@ CREATE INDEX IF NOT EXISTS scans_repo_id_idx ON scans(repo_id);
 CREATE INDEX IF NOT EXISTS scans_created_at_idx ON scans(created_at DESC);
 CREATE INDEX IF NOT EXISTS installations_account_idx ON installations(account_login);
 CREATE INDEX IF NOT EXISTS repos_token_hash_idx ON repos(token_hash);
+
+-- Run once to add new columns (safe to re-run — IF NOT EXISTS guards)
+ALTER TABLE repos ADD COLUMN IF NOT EXISTS slack_webhook_url TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS scan_retention_days INTEGER DEFAULT 30;
 `;

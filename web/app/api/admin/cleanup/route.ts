@@ -25,14 +25,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid token" }, { status: 401 });
   }
 
+  // Respect per-user retention setting; fall back to 90 days for unowned repos
   const result = await sql`
-    DELETE FROM scans
-    WHERE created_at < NOW() - INTERVAL '90 days'
+    DELETE FROM scans s
+    USING repos r
+    LEFT JOIN users u ON r.user_id = u.id
+    WHERE s.repo_id = r.id
+      AND s.created_at < NOW() - (
+        COALESCE(u.scan_retention_days, 90) || ' days'
+      )::INTERVAL
   `;
 
   return NextResponse.json({
     ok: true,
     deleted: (result as any).count ?? 0,
-    message: "Scan records older than 90 days have been purged",
+    message: "Old scan records purged (per-user retention policy applied)",
   });
 }

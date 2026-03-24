@@ -117,6 +117,12 @@ export async function POST(req: NextRequest) {
   // Truncate title to 80 chars (no code content should slip through)
   const title = payload.title?.slice(0, 80) ?? null;
 
+  // ── Fetch Slack webhook (if configured for this repo) ────────────────────
+  const repoMeta = await sql`
+    SELECT owner, name, slack_webhook_url FROM repos WHERE id = ${repoId} LIMIT 1
+  `;
+  const slackUrl = (repoMeta[0] as any)?.slack_webhook_url as string | null;
+
   // ── Insert scan record (metadata only, no code) ───────────────────────────
   await sql`
     INSERT INTO scans (
@@ -136,6 +142,32 @@ export async function POST(req: NextRequest) {
       ${payload.scan_ms ?? null}
     )
   `;
+
+  // ── Slack notification on TRUE_POSITIVE ──────────────────────────────────
+  if (slackUrl && payload.verdict === "TRUE_POSITIVE") {
+    const owner = (repoMeta[0] as any)?.owner ?? "";
+    const name = (repoMeta[0] as any)?.name ?? "";
+    const prLink = payload.pr_url
+      ? `<${payload.pr_url}|PR #${payload.pr_number}>`
+      : `commit \`${payload.commit_sha?.slice(0, 7)}\``;
+    const slackBody = {
+      text: `🚨 *AegisDiff — Security Issue Detected*`,
+      blocks: [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `🚨 *${payload.title ?? "Security issue detected"}*\n*Repo:* \`${owner}/${name}\` · ${prLink}\n*Severity:* ${payload.severity ?? "N/A"} · *CWE:* ${payload.cwe_id ?? "N/A"} · *Confidence:* ${Math.round((payload.confidence ?? 0) * 100)}%`,
+          },
+        },
+      ],
+    };
+    fetch(slackUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(slackBody),
+    }).catch((e) => console.error("[ingest] Slack notification failed:", e));
+  }
 
   return NextResponse.json({ ok: true }, { status: 201 });
 }

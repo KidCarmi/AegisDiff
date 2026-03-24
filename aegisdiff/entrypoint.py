@@ -21,6 +21,23 @@ logging.basicConfig(
 logger = logging.getLogger("aegisdiff.entrypoint")
 
 
+def _verdict_to_status(verdict) -> tuple[str, str]:
+    """Map a Verdict to a GitHub commit status state + description."""
+    from .triage.verdicts import VerdictType
+
+    v = verdict.verdict
+    conf = verdict.confidence
+    if v == VerdictType.TRUE_POSITIVE:
+        if conf >= 0.8:
+            return "failure", f"Security issue detected: {verdict.title[:100]}"
+        return "pending", f"Possible security issue (low confidence): {verdict.title[:80]}"
+    if v == VerdictType.FALSE_POSITIVE:
+        return "success", "No security issues detected"
+    if v == VerdictType.NEEDS_REVIEW:
+        return "pending", f"Needs manual security review: {verdict.title[:90]}"
+    return "error", "Security analysis failed — check workflow logs"
+
+
 def _send_to_ingest(
     ingest_url: str, repo_token: str, verdict, pr_number, commit_sha, repo, scan_ms: int
 ) -> None:
@@ -107,12 +124,14 @@ def main() -> None:
         sha=sha_short,
     )
 
-    # Post to PR (if we have the needed context)
+    # Post to PR + commit status (if we have the needed context)
     if cfg.pr_number and cfg.github_token and cfg.repo:
         client = GitHubClient(cfg.github_token, cfg.repo)
         client.upsert_pr_comment(cfg.pr_number, comment_body, COMMENT_MARKER)
+        # Post commit status so result appears in the PR merge checklist
+        status_state, status_desc = _verdict_to_status(verdict)
+        client.post_commit_status(cfg.commit_sha, status_state, status_desc)
     else:
-        # Push event or no PR context — print to stdout for Actions step summary
         print(comment_body)
 
     # Send metadata to dashboard (no code content)

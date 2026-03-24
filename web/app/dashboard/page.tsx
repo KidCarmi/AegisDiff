@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { authOptions } from "../../lib/auth";
 import { sql } from "../../lib/db";
 import { ScanCard } from "../../components/ScanCard";
+import { TrendChart } from "../../components/TrendChart";
 import type { Scan } from "../../lib/types";
 
 async function getRecentScans(githubId: number, username: string): Promise<Scan[]> {
@@ -107,13 +108,18 @@ export default async function DashboardPage() {
       </div>
 
       {/* Stats */}
-      <div className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <div className="mb-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
         {statCards.map((s) => (
           <div key={s.label} className="rounded-lg border border-gray-200 bg-white p-4 text-center shadow-sm">
             <div className={`text-3xl font-bold ${s.color}`}>{s.value}</div>
             <div className="mt-1 text-xs text-gray-500">{s.label}</div>
           </div>
         ))}
+      </div>
+
+      {/* Trend chart */}
+      <div className="mb-8">
+        <TrendChart githubId={githubId} username={username} />
       </div>
 
       {/* GitHub App install banner — only shown when no repos are connected yet */}
@@ -145,13 +151,22 @@ export default async function DashboardPage() {
         </div>
       )}
 
-      {/* Connected — show manage repos link */}
+      {/* Connected — show manage repos link + export */}
       {connected && (
         <div className="mb-6 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-800">Recent Scans</h2>
-          <a href="/repos" className="text-sm text-blue-600 hover:underline">
-            Manage repos →
-          </a>
+          <div className="flex items-center gap-4">
+            <a
+              href="/api/scans/export"
+              className="text-sm text-gray-500 hover:text-gray-800"
+              download
+            >
+              Export CSV ↓
+            </a>
+            <a href="/repos" className="text-sm text-blue-600 hover:underline">
+              Manage repos →
+            </a>
+          </div>
         </div>
       )}
 

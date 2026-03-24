@@ -75,3 +75,24 @@ class GitHubClient:
             resp.raise_for_status()
         except httpx.HTTPError as e:
             logger.warning("Failed to update PR comment #%d: %s", comment_id, e)
+
+    def post_commit_status(
+        self,
+        sha: str,
+        state: str,
+        description: str,
+        context: str = "AegisDiff / security",
+    ) -> None:
+        """Post a GitHub commit status. state: success | failure | pending | error."""
+        url = f"{GITHUB_API_BASE}/repos/{self._repo}/statuses/{sha}"
+        try:
+            resp = httpx.post(
+                url,
+                headers=self._headers,
+                json={"state": state, "description": description[:140], "context": context},
+                timeout=15.0,
+            )
+            resp.raise_for_status()
+            logger.info("Posted commit status '%s' on %s", state, sha[:7])
+        except httpx.HTTPError as e:
+            logger.warning("Failed to post commit status: %s", e)
