@@ -2,6 +2,7 @@ import { getServerSession } from "next-auth/next";
 import { redirect } from "next/navigation";
 import { authOptions } from "../../lib/auth";
 import { sql } from "../../lib/db";
+import { RepoSetup } from "./RepoSetup";
 
 interface RepoRow {
   id: number;
@@ -55,6 +56,7 @@ export default async function ReposPage() {
   const repos = await getRepos(githubId, username);
 
   const appSlug = process.env.NEXT_PUBLIC_GITHUB_APP_SLUG ?? "aegisdiff";
+  const ingestUrl = `${process.env.NEXTAUTH_URL ?? ""}/api/ingest`;
 
   return (
     <div>
@@ -146,6 +148,12 @@ export default async function ReposPage() {
                 </a>
               </div>
             </div>
+            <RepoSetup
+              owner={repo.owner}
+              name={repo.name}
+              appInstalled={repo.appInstalled}
+              ingestUrl={ingestUrl}
+            />
           ))}
         </div>
       )}
