@@ -16,8 +16,22 @@
  * GitHub Actions workflow handles the heavy lifting with our own API keys.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { createHmac, timingSafeEqual } from "crypto";
+import { createHmac, createHash, timingSafeEqual } from "crypto";
 import { sql } from "../../../../lib/db";
+
+/**
+ * Derive a stable, per-repo ingest token from the webhook secret.
+ * token = HMAC-SHA256(GITHUB_APP_WEBHOOK_SECRET, "owner/name")
+ * token_hash = SHA256(token)
+ *
+ * This lets us reconstruct the raw token at dispatch time without storing it.
+ */
+function deriveRepoToken(repoSlug: string): { rawToken: string; tokenHash: string } {
+  const secret = process.env.GITHUB_APP_WEBHOOK_SECRET ?? "dev-secret";
+  const rawToken = createHmac("sha256", secret).update(repoSlug).digest("hex");
+  const tokenHash = createHash("sha256").update(rawToken).digest("hex");
+  return { rawToken, tokenHash };
+}
 
 // ── Signature verification ────────────────────────────────────────────────────
 
@@ -138,31 +152,34 @@ async function registerRepos(installationId: number, repositories: any[]): Promi
       SELECT id FROM repos WHERE owner = ${owner} AND name = ${name} LIMIT 1
     `;
 
+    const { tokenHash } = deriveRepoToken(`${owner}/${name}`);
+
     if (existing.length > 0) {
-      // Update existing row to link the installation
+      // Update existing row to link the installation and fix token if it was a placeholder
       await sql`
         UPDATE repos
         SET installation_id = ${installationId},
-            github_repo_id  = ${r.id}
+            github_repo_id  = ${r.id},
+            token_hash      = ${tokenHash}
         WHERE owner = ${owner} AND name = ${name}
       `;
     } else {
       // Create a new row — no user_id (app-installed repos aren't owned by a
       // specific dashboard user until someone signs in and views them)
-      const placeholder = `app-install-${installationId}-${r.id}`;
       await sql`
         INSERT INTO repos (user_id, owner, name, token_hash, installation_id, github_repo_id)
         VALUES (
           NULL,
           ${owner},
           ${name},
-          ${placeholder},
+          ${tokenHash},
           ${installationId},
           ${r.id}
         )
         ON CONFLICT (owner, name) DO UPDATE
           SET installation_id = EXCLUDED.installation_id,
-              github_repo_id  = EXCLUDED.github_repo_id
+              github_repo_id  = EXCLUDED.github_repo_id,
+              token_hash      = EXCLUDED.token_hash
       `;
     }
 
@@ -183,14 +200,20 @@ async function handlePullRequest(payload: any): Promise<void> {
   const prNumber = pull_request.number as number;
   const headSha = pull_request.head.sha as string;
 
-  // Look up the ingest token for this repo
+  // Derive the per-repo ingest token (deterministic from webhook secret + repo slug)
+  // This matches the token_hash stored during installation registration.
   const [owner, name] = repo.split("/");
-  const rows = await sql`
-    SELECT token_hash FROM repos WHERE owner = ${owner} AND name = ${name} LIMIT 1
-  `;
-  const ingestToken = rows.length > 0 ? (rows[0] as any).token_hash as string : "";
+  const { rawToken, tokenHash } = deriveRepoToken(repo);
 
-  await triggerAnalysis(installation.id, repo, prNumber, headSha, ingestToken);
+  // Also ensure the stored token_hash is up-to-date (migrates old placeholder rows)
+  await sql`
+    UPDATE repos
+    SET token_hash = ${tokenHash}
+    WHERE owner = ${owner} AND name = ${name}
+      AND (token_hash LIKE 'app-install-%' OR token_hash != ${tokenHash})
+  `;
+
+  await triggerAnalysis(installation.id, repo, prNumber, headSha, rawToken);
 }
 
 // ── Main handler ──────────────────────────────────────────────────────────────
