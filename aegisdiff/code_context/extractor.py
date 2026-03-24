@@ -377,8 +377,9 @@ class CodeContextExtractor:
 
     def _summarize_diff(self, raw_diff: str, changed_files: List[str]) -> str:
         file_count = len(changed_files)
-        added = sum(1 for l in raw_diff.splitlines() if l.startswith("+") and not l.startswith("+++"))
-        removed = sum(1 for l in raw_diff.splitlines() if l.startswith("-") and not l.startswith("---"))
+        lines = raw_diff.splitlines()
+        added = sum(1 for ln in lines if ln.startswith("+") and not ln.startswith("+++"))
+        removed = sum(1 for ln in lines if ln.startswith("-") and not ln.startswith("---"))
         return f"{file_count} file(s) changed, {added} insertions(+), {removed} deletions(-)"
 
     # ------------------------------------------------------------------

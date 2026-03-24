@@ -12,7 +12,6 @@ cache operations are silently no-ops.
 """
 from __future__ import annotations
 
-import dataclasses
 import hashlib
 import json
 import logging

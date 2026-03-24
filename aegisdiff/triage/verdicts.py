@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
@@ -102,9 +103,13 @@ def parse_verdict(llm_output: str, provider: str = "unknown") -> Verdict:
 
         # Enforce calibration rules from the system prompt
         raw_verdict = data.get("verdict", "ERROR")
-        # Clamp confidence to [0, 1] — LLMs can hallucinate out-of-range values
+        # Clamp confidence to [0, 1] — LLMs can hallucinate out-of-range or NaN values
         raw_confidence = data.get("confidence", 0.0)
-        confidence = max(0.0, min(1.0, float(raw_confidence))) if isinstance(raw_confidence, (int, float)) and not (raw_confidence != raw_confidence) else 0.0  # noqa: PLR0124
+        confidence = (
+            max(0.0, min(1.0, float(raw_confidence)))
+            if isinstance(raw_confidence, (int, float)) and math.isfinite(raw_confidence)
+            else 0.0
+        )
 
         # Rule 1: TRUE_POSITIVE requires confidence >= 0.7
         if raw_verdict == "TRUE_POSITIVE" and confidence < 0.7:

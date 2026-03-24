@@ -8,8 +8,11 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
+  issues: write
 
 jobs:
+  # ── Job 1: unit tests + lint ──────────────────────────────────────────────
   test:
     name: Test & Lint
     runs-on: ubuntu-latest
@@ -26,8 +29,7 @@ jobs:
           cache: "pip"
 
       - name: Install dependencies
-        run: |
-          pip install --quiet -e .[dev]
+        run: pip install --quiet -e .[dev]
 
       - name: Lint (ruff)
         run: ruff check aegisdiff/
@@ -37,3 +39,77 @@ jobs:
 
       - name: Run tests
         run: pytest --tb=short -q
+
+  # ── Job 2: dogfood — scan this PR's own diff ──────────────────────────────
+  appsec:
+    name: AppSec Self-Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Only run when LLM keys are available (skips forks without secrets)
+    if: >
+      (github.event_name == 'pull_request' ||
+       github.event_name == 'push') &&
+      vars.AEGISDIFF_SELF_SCAN != 'false'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install AegisDiff
+        run: pip install --quiet -e .[dev]
+
+      - name: Generate diff
+        id: diff
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          else
+            BASE_SHA="${{ github.event.before }}"
+            HEAD_SHA="${{ github.sha }}"
+          fi
+
+          timeout 60 git diff "${BASE_SHA}...${HEAD_SHA}" \
+            -- "*.py" "*.js" "*.ts" "*.tsx" "*.jsx" "*.go" "*.java" "*.rb" "*.php" \
+            > /tmp/aegisdiff_pr.diff 2>/dev/null || true
+
+          if [ ! -s /tmp/aegisdiff_pr.diff ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "diff_lines=$(wc -l < /tmp/aegisdiff_pr.diff)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run AegisDiff triage
+        if: steps.diff.outputs.skip == 'false'
+        continue-on-error: true   # Never block CI on triage failure
+        env:
+          GEMINI_API_KEY:        ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY:          ${{ secrets.GROQ_API_KEY }}
+          GROQ_API_KEY_2:        ${{ secrets.GROQ_API_KEY_2 }}
+          GROQ_API_KEY_3:        ${{ secrets.GROQ_API_KEY_3 }}
+          GITHUB_TOKEN:          ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER:             ${{ github.event.pull_request.number || '' }}
+          COMMIT_SHA:            ${{ github.sha }}
+          REPO:                  ${{ github.repository }}
+          DIFF_PATH:             /tmp/aegisdiff_pr.diff
+          AEGISDIFF_INGEST_URL:  ${{ secrets.AEGISDIFF_INGEST_URL }}
+          AEGISDIFF_REPO_TOKEN:  ${{ secrets.AEGISDIFF_REPO_TOKEN }}
+        run: python -m aegisdiff.entrypoint
+
+      - name: Write step summary
+        if: always() && steps.diff.outputs.skip == 'false'
+        run: |
+          echo "### AegisDiff Self-Scan" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Diff lines:** ${{ steps.diff.outputs.diff_lines || 0 }}" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f /tmp/step_summary.md ]; then
+            cat /tmp/step_summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi

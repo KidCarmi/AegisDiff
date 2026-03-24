@@ -45,7 +45,10 @@ class GeminiProvider(LLMProvider):
             content = data["candidates"][0]["content"]["parts"][0]["text"]
         except (KeyError, IndexError) as e:
             # Safety filter or unexpected response shape (e.g. finishReason=SAFETY)
-            finish = data.get("candidates", [{}])[0].get("finishReason", "UNKNOWN") if data.get("candidates") else "NO_CANDIDATES"
+            candidates = data.get("candidates")
+            finish = (
+                candidates[0].get("finishReason", "UNKNOWN") if candidates else "NO_CANDIDATES"
+            )
             raise ValueError(f"Gemini response missing content (finishReason={finish})") from e
         usage = data.get("usageMetadata", {})
 

@@ -7,8 +7,6 @@ ingest endpoint (no code content, metadata only).
 """
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
 import sys
 from pathlib import Path
@@ -22,10 +20,10 @@ logging.basicConfig(
 logger = logging.getLogger("aegisdiff.entrypoint")
 
 
-def _send_to_ingest(ingest_url: str, repo_token: str, verdict, pr_number, commit_sha, repo, scan_ms: int) -> None:
+def _send_to_ingest(
+    ingest_url: str, repo_token: str, verdict, pr_number, commit_sha, repo, scan_ms: int
+) -> None:
     """POST scan metadata (no code) to the AegisDiff dashboard ingest endpoint."""
-    from .triage.verdicts import VerdictType
-
     payload = {
         "verdict": verdict.verdict.value,
         "severity": verdict.severity.value,
@@ -48,16 +46,16 @@ def _send_to_ingest(ingest_url: str, repo_token: str, verdict, pr_number, commit
 
 
 def main() -> None:
+    import time
+
     from .config import load_config
+    from .github.client import GitHubClient
+    from .github.pr_comment import COMMENT_MARKER, format_verdict_comment
     from .llm.orchestrator import LLMOrchestrator
     from .llm.providers.gemini import GeminiProvider
     from .llm.providers.groq import GroqProvider
     from .triage.engine import TriageEngine
     from .triage.verdicts import VerdictType
-    from .github.client import GitHubClient
-    from .github.pr_comment import format_verdict_comment, COMMENT_MARKER
-
-    import time
 
     cfg = load_config()
 
@@ -66,7 +64,8 @@ def main() -> None:
     if not cfg.gemini_api_key and not groq_keys:
         logger.error(
             "No LLM API keys configured. "
-            "Set GEMINI_API_KEY and/or GROQ_API_KEY / GROQ_API_KEY_2 / GROQ_API_KEY_3 in GitHub Secrets."
+            "Set GEMINI_API_KEY and/or GROQ_API_KEY / GROQ_API_KEY_2 / GROQ_API_KEY_3 "
+            "in GitHub Secrets."
         )
         sys.exit(1)
 

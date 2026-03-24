@@ -73,15 +73,15 @@ def _send_to_ingest(
 
 
 def main() -> None:
+    import time
+
+    from .github.app_client import GitHubAppClient
+    from .github.pr_comment import COMMENT_MARKER, format_verdict_comment
     from .llm.orchestrator import LLMOrchestrator
     from .llm.providers.gemini import GeminiProvider
     from .llm.providers.groq import GroqProvider
     from .triage.engine import TriageEngine
     from .triage.verdicts import VerdictType
-    from .github.app_client import GitHubAppClient
-    from .github.pr_comment import format_verdict_comment, COMMENT_MARKER
-
-    import time
 
     # ── Config ────────────────────────────────────────────────────────────────
     app_id = _get_env("GITHUB_APP_ID")
@@ -114,7 +114,9 @@ def main() -> None:
     # ── Fetch diff via GitHub App ─────────────────────────────────────────────
     app_client = GitHubAppClient(app_id=app_id, private_key_pem=private_key)
 
-    logger.info("Fetching diff for %s#%d (installation %d)", target_repo, pr_number, installation_id)
+    logger.info(
+        "Fetching diff for %s#%d (installation %d)", target_repo, pr_number, installation_id
+    )
     raw_diff = app_client.get_pr_diff(installation_id, owner, repo_name, pr_number)
 
     if not raw_diff.strip():
@@ -156,7 +158,9 @@ def main() -> None:
 
     # ── Send metadata to dashboard ────────────────────────────────────────────
     if ingest_url and ingest_token:
-        _send_to_ingest(ingest_url, ingest_token, verdict, pr_number, commit_sha, target_repo, scan_ms)
+        _send_to_ingest(
+            ingest_url, ingest_token, verdict, pr_number, commit_sha, target_repo, scan_ms
+        )
 
     # ── Exit code ─────────────────────────────────────────────────────────────
     if verdict.verdict == VerdictType.TRUE_POSITIVE and verdict.confidence >= 0.8:

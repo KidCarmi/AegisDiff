@@ -9,7 +9,7 @@ from ..code_context.extractor import CodeContextExtractor
 from ..llm.orchestrator import LLMOrchestrator
 from ..llm.providers.base import LLMRequest
 from .prompts import APPSEC_SYSTEM_PROMPT, build_user_message
-from .verdicts import Verdict, VerdictType, parse_verdict
+from .verdicts import Verdict, parse_verdict
 
 logger = logging.getLogger(__name__)
 
