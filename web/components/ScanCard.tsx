@@ -1,9 +1,12 @@
 import { VerdictBadge } from "./VerdictBadge";
-import { SEVERITY_COLORS, type Scan } from "../lib/types";
+import { SEVERITY_COLORS, type Scan, type VerdictType } from "../lib/types";
 
-interface ScanCardProps {
-  scan: Scan;
-}
+const VERDICT_BORDER: Record<VerdictType, string> = {
+  TRUE_POSITIVE: "border-l-red-400",
+  FALSE_POSITIVE: "border-l-green-400",
+  NEEDS_REVIEW: "border-l-yellow-400",
+  ERROR: "border-l-gray-300",
+};
 
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -15,18 +18,21 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-export function ScanCard({ scan }: ScanCardProps) {
+export function ScanCard({ scan }: { scan: Scan }) {
   const repoSlug = `${scan.repoOwner}/${scan.repoName}`;
   const severityClass = SEVERITY_COLORS[scan.severity ?? "N/A"] ?? "text-gray-400";
   const sha = scan.commitSha.slice(0, 7);
+  const borderColor = VERDICT_BORDER[scan.verdict] ?? "border-l-gray-300";
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm hover:shadow-md transition-shadow">
+    <div
+      className={`rounded-lg border border-gray-200 border-l-4 ${borderColor} bg-white px-4 py-3 shadow-sm hover:shadow-md transition-shadow`}
+    >
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
-          {/* Repo + PR */}
-          <div className="flex items-center gap-2 text-sm text-gray-500 mb-1">
-            <span className="font-mono font-medium text-gray-700 truncate">{repoSlug}</span>
+          {/* Repo + PR + SHA */}
+          <div className="flex items-center gap-2 text-xs text-gray-400 mb-1 flex-wrap">
+            <span className="font-mono font-semibold text-gray-700 truncate">{repoSlug}</span>
             {scan.prNumber && (
               <>
                 <span>·</span>
@@ -35,7 +41,8 @@ export function ScanCard({ scan }: ScanCardProps) {
                     href={scan.prUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-blue-600 hover:underline"
+                    onClick={(e) => e.stopPropagation()}
+                    className="text-blue-500 hover:underline"
                   >
                     PR #{scan.prNumber}
                   </a>
@@ -45,7 +52,9 @@ export function ScanCard({ scan }: ScanCardProps) {
               </>
             )}
             <span>·</span>
-            <span className="font-mono text-xs">{sha}</span>
+            <span className="font-mono">{sha}</span>
+            <span>·</span>
+            <span>{timeAgo(scan.createdAt)}</span>
           </div>
 
           {/* Title */}
@@ -53,26 +62,29 @@ export function ScanCard({ scan }: ScanCardProps) {
             <p className="text-sm text-gray-900 font-medium truncate">{scan.title}</p>
           )}
 
-          {/* Metadata row */}
-          <div className="flex items-center gap-3 mt-2 text-xs text-gray-500">
+          {/* Meta chips */}
+          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
             {scan.severity && scan.severity !== "N/A" && (
-              <span className={severityClass}>{scan.severity}</span>
+              <span className={`text-xs font-semibold ${severityClass}`}>{scan.severity}</span>
             )}
             {scan.cweId && scan.cweId !== "N/A" && (
-              <span className="font-mono">{scan.cweId}</span>
+              <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] font-mono text-gray-600">
+                {scan.cweId}
+              </span>
             )}
             {scan.confidence != null && (
-              <span>{Math.round(scan.confidence * 100)}% confidence</span>
+              <span className="text-xs text-gray-400">
+                {Math.round(scan.confidence * 100)}% confidence
+              </span>
             )}
             {scan.provider && (
-              <span className="capitalize">{scan.provider}</span>
+              <span className="text-xs text-gray-400 capitalize">{scan.provider}</span>
             )}
-            <span>{timeAgo(scan.createdAt)}</span>
           </div>
         </div>
 
         {/* Verdict badge */}
-        <div className="flex-shrink-0">
+        <div className="shrink-0 self-center">
           <VerdictBadge verdict={scan.verdict} />
         </div>
       </div>

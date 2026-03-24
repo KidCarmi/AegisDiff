@@ -2,8 +2,8 @@ import { getServerSession } from "next-auth/next";
 import { redirect } from "next/navigation";
 import { authOptions } from "../../lib/auth";
 import { sql } from "../../lib/db";
-import { ScanCard } from "../../components/ScanCard";
 import { TrendChart } from "../../components/TrendChart";
+import { ScanList } from "../../components/ScanList";
 import type { Scan } from "../../lib/types";
 
 async function getRecentScans(githubId: number, username: string): Promise<Scan[]> {
@@ -33,7 +33,7 @@ async function getRecentScans(githubId: number, username: string): Promise<Scan[
       )
       OR (r.installation_id IS NOT NULL AND r.owner = ${username})
     ORDER BY s.created_at DESC
-    LIMIT 50
+    LIMIT 100
   `;
   return rows as unknown as Scan[];
 }
@@ -57,10 +57,14 @@ async function getScanStats(githubId: number, username: string) {
     )
     AND s.created_at > NOW() - INTERVAL '30 days'
   `;
-  return rows[0] as { total: string; true_positives: string; false_positives: string; needs_review: string };
+  return rows[0] as {
+    total: string;
+    true_positives: string;
+    false_positives: string;
+    needs_review: string;
+  };
 }
 
-/** Returns true if the user has at least one connected repo (owned or via GitHub App). */
 async function hasConnectedRepos(githubId: number, username: string): Promise<boolean> {
   const owned = await sql`
     SELECT 1 FROM repos r
@@ -91,108 +95,138 @@ export default async function DashboardPage() {
     hasConnectedRepos(githubId, username),
   ]);
 
+  // New users with no repos → onboarding
+  if (!connected && scans.length === 0) {
+    redirect("/onboarding");
+  }
+
   const statCards = [
-    { label: "Total Scans (30d)", value: stats?.total ?? "0", color: "text-gray-900" },
-    { label: "True Positives", value: stats?.true_positives ?? "0", color: "text-red-600" },
-    { label: "False Positives", value: stats?.false_positives ?? "0", color: "text-green-600" },
-    { label: "Needs Review", value: stats?.needs_review ?? "0", color: "text-yellow-600" },
+    {
+      label: "Total Scans",
+      value: stats?.total ?? "0",
+      sub: "last 30 days",
+      color: "text-gray-900",
+      bg: "bg-white",
+    },
+    {
+      label: "Issues Found",
+      value: stats?.true_positives ?? "0",
+      sub: "true positives",
+      color: "text-red-600",
+      bg: "bg-red-50",
+    },
+    {
+      label: "False Positives",
+      value: stats?.false_positives ?? "0",
+      sub: "noise filtered",
+      color: "text-green-600",
+      bg: "bg-green-50",
+    },
+    {
+      label: "Needs Review",
+      value: stats?.needs_review ?? "0",
+      sub: "human check needed",
+      color: "text-yellow-600",
+      bg: "bg-yellow-50",
+    },
   ];
+
+  const hasScans = scans.length > 0;
 
   return (
     <div>
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-gray-900">Security Dashboard</h1>
-        <p className="mt-1 text-sm text-gray-500">
-          Last 30 days · {username || session.user?.name}
-        </p>
+      {/* Header */}
+      <div className="mb-6 flex items-start justify-between flex-wrap gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Security Dashboard</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            {username || session.user?.name} · Last 30 days
+          </p>
+        </div>
+        {hasScans && (
+          <div className="flex items-center gap-3">
+            <a
+              href="/api/scans/export"
+              className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 transition-colors"
+              download
+            >
+              ↓ Export CSV
+            </a>
+            <a
+              href="/repos"
+              className="rounded-lg bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-700 transition-colors"
+            >
+              Manage repos →
+            </a>
+          </div>
+        )}
       </div>
 
       {/* Stats */}
-      <div className="mb-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
         {statCards.map((s) => (
-          <div key={s.label} className="rounded-lg border border-gray-200 bg-white p-4 text-center shadow-sm">
+          <div
+            key={s.label}
+            className={`rounded-xl border border-gray-200 ${s.bg} p-4 shadow-sm`}
+          >
             <div className={`text-3xl font-bold ${s.color}`}>{s.value}</div>
-            <div className="mt-1 text-xs text-gray-500">{s.label}</div>
+            <div className="mt-1 text-xs font-semibold text-gray-700">{s.label}</div>
+            <div className="text-[11px] text-gray-400 mt-0.5">{s.sub}</div>
           </div>
         ))}
       </div>
 
       {/* Trend chart */}
-      <div className="mb-8">
-        <TrendChart githubId={githubId} username={username} />
-      </div>
+      {hasScans && (
+        <div className="mb-6">
+          <TrendChart githubId={githubId} username={username} />
+        </div>
+      )}
 
-      {/* GitHub App install banner — only shown when no repos are connected yet */}
-      {!connected && (
-        <div className="mb-8 rounded-xl border border-blue-200 bg-blue-50 p-6">
-          <h2 className="text-base font-semibold text-blue-900">
-            Get started in 30 seconds
-          </h2>
-          <p className="mt-1 text-sm text-blue-700">
-            Install the AegisDiff GitHub App on your repos — no YAML, no secrets, zero config.
-            Every pull request is scanned automatically using our API keys.
-          </p>
-          <div className="mt-4 flex flex-wrap gap-3">
-            <a
-              href={`https://github.com/apps/${process.env.NEXT_PUBLIC_GITHUB_APP_SLUG ?? "aegisdiff"}/installations/new`}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Install on GitHub
-            </a>
-            <a
-              href="/repos"
-              className="inline-flex items-center gap-2 rounded-lg border border-blue-300 bg-white px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50"
-            >
-              Manual setup (bring your own keys)
-            </a>
+      {/* Waiting for first scan — has repos but no scans yet */}
+      {connected && !hasScans && (
+        <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 p-6">
+          <div className="flex items-start gap-4">
+            <div className="text-3xl">⏳</div>
+            <div className="flex-1">
+              <h2 className="text-base font-semibold text-blue-900 mb-1">
+                Waiting for your first scan
+              </h2>
+              <p className="text-sm text-blue-700 mb-4">
+                Your repo is connected. Open a pull request to trigger the first
+                security analysis — results appear here within ~90 seconds.
+              </p>
+              <div className="flex gap-2 flex-wrap">
+                {[
+                  { icon: "✓", text: "Signed in" },
+                  { icon: "✓", text: "Repo connected" },
+                  { icon: "→", text: "Open a PR", highlight: true },
+                ].map((step) => (
+                  <div
+                    key={step.text}
+                    className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ${
+                      step.highlight
+                        ? "bg-blue-600 text-white"
+                        : "bg-blue-100 text-blue-700"
+                    }`}
+                  >
+                    <span>{step.icon}</span>
+                    {step.text}
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Connected — show manage repos link + export */}
-      {connected && (
-        <div className="mb-6 flex items-center justify-between">
+      {/* Scan list */}
+      <div>
+        <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-800">Recent Scans</h2>
-          <div className="flex items-center gap-4">
-            <a
-              href="/api/scans/export"
-              className="text-sm text-gray-500 hover:text-gray-800"
-              download
-            >
-              Export CSV ↓
-            </a>
-            <a href="/repos" className="text-sm text-blue-600 hover:underline">
-              Manage repos →
-            </a>
-          </div>
         </div>
-      )}
-
-      {/* Recent scans */}
-      {!connected && <h2 className="mb-4 text-lg font-semibold text-gray-800">Recent Scans</h2>}
-      {scans.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-gray-300 p-12 text-center">
-          <p className="text-gray-500">No scans yet.</p>
-          <p className="mt-2 text-sm text-gray-400">
-            {connected
-              ? "Open a pull request on a connected repo to trigger the first scan."
-              : <>Install the GitHub App above or{" "}
-                <a href="/repos" className="text-blue-600 hover:underline">connect a repository manually</a>
-                {" "}to start analyzing pull requests.</>
-            }
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {scans.map((scan) => (
-            <a key={scan.id} href={`/scans/${scan.id}`}>
-              <ScanCard scan={scan} />
-            </a>
-          ))}
-        </div>
-      )}
+        <ScanList scans={scans} />
+      </div>
     </div>
   );
 }
