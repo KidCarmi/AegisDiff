@@ -40,7 +40,52 @@ jobs:
       - name: Run tests
         run: pytest --tb=short -q
 
-  # ── Job 2: dogfood — scan this PR's own diff ──────────────────────────────
+  # ── Job 2: canary — always scan the known-vulnerable fixture ─────────────
+  # Sends a real scan result to the dashboard on every push so the GUI always
+  # has data. Expected verdict: TRUE_POSITIVE (SQLi in sample.diff).
+  # continue-on-error keeps CI green — this is a metric, not a gate.
+  canary:
+    name: Canary Scan (fixture)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install AegisDiff
+        run: pip install --quiet -e .[dev]
+
+      - name: Run canary scan (sample.diff — known SQLi)
+        continue-on-error: true   # Metric only — never blocks CI
+        env:
+          GEMINI_API_KEY:       ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY:         ${{ secrets.GROQ_API_KEY }}
+          GROQ_API_KEY_2:       ${{ secrets.GROQ_API_KEY_2 }}
+          GROQ_API_KEY_3:       ${{ secrets.GROQ_API_KEY_3 }}
+          COMMIT_SHA:           ${{ github.sha }}
+          REPO:                 ${{ github.repository }}
+          DIFF_PATH:            tests/fixtures/sample.diff
+          AEGISDIFF_INGEST_URL: ${{ secrets.AEGISDIFF_INGEST_URL }}
+          AEGISDIFF_REPO_TOKEN: ${{ secrets.AEGISDIFF_REPO_TOKEN }}
+        run: python -m aegisdiff.entrypoint
+
+      - name: Write step summary
+        if: always()
+        run: |
+          echo "### Canary Scan — \`tests/fixtures/sample.diff\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Expected: **TRUE_POSITIVE** (SQLi + cmd injection)" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f /tmp/step_summary.md ]; then
+            cat /tmp/step_summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # ── Job 3: dogfood — scan this PR's own diff ──────────────────────────────
   appsec:
     name: AppSec Self-Scan
     runs-on: ubuntu-latest
