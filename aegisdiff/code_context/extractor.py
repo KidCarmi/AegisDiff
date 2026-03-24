@@ -58,7 +58,7 @@ PYTHON_SINK_PATTERNS: Dict[str, re.Pattern] = {
 
 PYTHON_SOURCE_PATTERNS: Dict[str, re.Pattern] = {
     "http_param": re.compile(
-        r"\b(request\.(args|form|json|data|params|get_json|values|files)"
+        r"\b(request\.(args|form|json|data|params|get_json|values|files|GET|POST|PUT|PATCH|body)"
         r"|flask\.request|bottle\.request\.params"
         r"|self\.request\.(GET|POST|DATA|body))\b",
         re.IGNORECASE,
