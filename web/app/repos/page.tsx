@@ -108,52 +108,54 @@ export default async function ReposPage() {
           {repos.map((repo) => (
             <div
               key={repo.id}
-              className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-4 shadow-sm"
+              className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm"
             >
-              <div className="flex items-center gap-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono font-medium text-gray-900">
-                      {repo.owner}/{repo.name}
-                    </span>
-                    {repo.appInstalled ? (
-                      <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-700/10">
-                        GitHub App
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-medium text-gray-900">
+                        {repo.owner}/{repo.name}
                       </span>
-                    ) : (
-                      <span className="inline-flex items-center rounded-full bg-gray-50 px-2 py-0.5 text-xs font-medium text-gray-600 ring-1 ring-inset ring-gray-500/10">
-                        Manual
-                      </span>
-                    )}
+                      {repo.appInstalled ? (
+                        <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-700/10">
+                          GitHub App
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center rounded-full bg-gray-50 px-2 py-0.5 text-xs font-medium text-gray-600 ring-1 ring-inset ring-gray-500/10">
+                          Manual
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      Connected {new Date(repo.createdAt).toLocaleDateString()}
+                    </p>
                   </div>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    Connected {new Date(repo.createdAt).toLocaleDateString()}
-                  </p>
+                </div>
+                <div className="flex gap-3 items-center">
+                  <a
+                    href={`https://github.com/${repo.owner}/${repo.name}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-gray-400 hover:text-gray-700"
+                  >
+                    GitHub ↗
+                  </a>
+                  <a
+                    href={`/dashboard?repo=${repo.owner}/${repo.name}`}
+                    className="text-xs text-blue-600 hover:underline"
+                  >
+                    View scans
+                  </a>
                 </div>
               </div>
-              <div className="flex gap-3 items-center">
-                <a
-                  href={`https://github.com/${repo.owner}/${repo.name}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs text-gray-400 hover:text-gray-700"
-                >
-                  GitHub ↗
-                </a>
-                <a
-                  href={`/dashboard?repo=${repo.owner}/${repo.name}`}
-                  className="text-xs text-blue-600 hover:underline"
-                >
-                  View scans
-                </a>
-              </div>
+              <RepoSetup
+                owner={repo.owner}
+                name={repo.name}
+                appInstalled={repo.appInstalled}
+                ingestUrl={ingestUrl}
+              />
             </div>
-            <RepoSetup
-              owner={repo.owner}
-              name={repo.name}
-              appInstalled={repo.appInstalled}
-              ingestUrl={ingestUrl}
-            />
           ))}
         </div>
       )}
