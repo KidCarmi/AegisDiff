@@ -63,12 +63,12 @@ def format_verdict_comment(verdict: Verdict, pr_number: int, sha: str) -> str:
     )
 
     return f"""{COMMENT_MARKER}
-## {vrd_icon} AegisDiff Security Triage — `{verdict.verdict}`
+## {vrd_icon} AegisDiff Security Triage — `{verdict.verdict.value}`
 
 | Field | Value |
 |---|---|
-| Verdict | **{verdict.verdict}** |
-| Severity | {sev_icon} **{verdict.severity}** |
+| Verdict | **{verdict.verdict.value}** |
+| Severity | {sev_icon} **{verdict.severity.value}** |
 | CWE | `{verdict.cwe_id}` |
 | Confidence | {confidence_pct} |
 | Analyzed by | `{verdict.provider}` |

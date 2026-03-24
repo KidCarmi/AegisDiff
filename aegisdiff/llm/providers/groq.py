@@ -12,8 +12,8 @@ GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 class GroqProvider(LLMProvider):
     name = "groq"
-    model = "llama3-70b-8192"
-    max_context_tokens = 7_000  # 8192 limit; reserve ~1192 for output
+    model = "llama-3.3-70b-versatile"
+    max_context_tokens = 30_000  # 32k context; reserve ~2k for output
 
     def __init__(self, api_key: str) -> None:
         self._api_key = api_key
