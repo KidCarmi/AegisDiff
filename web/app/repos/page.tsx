@@ -152,7 +152,6 @@ export default async function ReposPage() {
               <RepoSetup
                 owner={repo.owner}
                 name={repo.name}
-                appInstalled={repo.appInstalled}
                 ingestUrl={ingestUrl}
               />
             </div>
