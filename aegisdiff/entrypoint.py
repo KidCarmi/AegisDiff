@@ -61,21 +61,24 @@ def main() -> None:
 
     cfg = load_config()
 
-    if not cfg.gemini_api_key and not cfg.groq_api_key:
+    groq_keys = [k for k in [cfg.groq_api_key, cfg.groq_api_key_2, cfg.groq_api_key_3] if k]
+
+    if not cfg.gemini_api_key and not groq_keys:
         logger.error(
             "No LLM API keys configured. "
-            "Set GEMINI_API_KEY and/or GROQ_API_KEY in GitHub Secrets."
+            "Set GEMINI_API_KEY and/or GROQ_API_KEY / GROQ_API_KEY_2 / GROQ_API_KEY_3 in GitHub Secrets."
         )
         sys.exit(1)
 
-    # Build provider list — only include providers with keys configured
+    # Build provider list — only include providers with keys configured.
+    # Multiple Groq keys rotate automatically on rate-limit (429).
     providers = []
     if cfg.gemini_api_key:
         providers.append(GeminiProvider(cfg.gemini_api_key))
-        logger.info("Primary provider: Gemini 1.5 Pro")
-    if cfg.groq_api_key:
-        providers.append(GroqProvider(cfg.groq_api_key))
-        logger.info("Fallback provider: Groq Llama-3-70b")
+        logger.info("Provider: Gemini 1.5 Pro")
+    for i, key in enumerate(groq_keys, start=1):
+        providers.append(GroqProvider(key))
+        logger.info("Provider: Groq Llama-3-70b (key %d/%d)", i, len(groq_keys))
 
     orchestrator = LLMOrchestrator(providers, max_retries_per_provider=3)
     engine = TriageEngine(orchestrator, repo_root=Path("."))

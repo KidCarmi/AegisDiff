@@ -10,6 +10,8 @@ from typing import Optional
 class Config:
     gemini_api_key: str
     groq_api_key: str
+    groq_api_key_2: str
+    groq_api_key_3: str
     github_token: str
     repo: str
     pr_number: Optional[int]
@@ -28,6 +30,8 @@ def load_config() -> Config:
     return Config(
         gemini_api_key=os.environ.get("GEMINI_API_KEY", ""),
         groq_api_key=os.environ.get("GROQ_API_KEY", ""),
+        groq_api_key_2=os.environ.get("GROQ_API_KEY_2", ""),
+        groq_api_key_3=os.environ.get("GROQ_API_KEY_3", ""),
         github_token=os.environ.get("GITHUB_TOKEN", ""),
         repo=os.environ.get("REPO", ""),
         pr_number=pr_number,

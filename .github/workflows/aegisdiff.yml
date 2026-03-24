@@ -92,8 +92,10 @@ jobs:
         if: steps.diff.outputs.skip == 'false'
         id: triage
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY:  ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY:    ${{ secrets.GROQ_API_KEY }}
+          GROQ_API_KEY_2:  ${{ secrets.GROQ_API_KEY_2 }}
+          GROQ_API_KEY_3:  ${{ secrets.GROQ_API_KEY_3 }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number || '' }}
           COMMIT_SHA: ${{ github.sha }}
