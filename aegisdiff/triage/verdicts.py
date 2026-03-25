@@ -65,12 +65,13 @@ class Verdict:
     @classmethod
     def error(cls, reason: str) -> "Verdict":
         """Return an error verdict when the analysis engine fails."""
+        short = reason.strip()[:80] if reason.strip() else "Analysis engine error"
         return cls(
             verdict=VerdictType.ERROR,
             severity=Severity.NA,
             cwe_id="N/A",
             confidence=0.0,
-            title="Analysis engine error",
+            title=short,
             summary=reason,
             evidence="",
             sanitizer_found=False,

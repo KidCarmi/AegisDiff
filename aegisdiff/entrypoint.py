@@ -38,8 +38,29 @@ def _verdict_to_status(verdict) -> tuple[str, str]:
     return "error", "Security analysis failed — check workflow logs"
 
 
+def _get_oidc_token() -> str | None:
+    """Fetch a GitHub Actions OIDC JWT for audience 'aegisdiff'."""
+    import os
+
+    token_url = os.environ.get("ACTIONS_ID_TOKEN_REQUEST_URL", "")
+    request_token = os.environ.get("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "")
+    if not token_url or not request_token:
+        return None
+    try:
+        resp = httpx.get(
+            f"{token_url}&audience=aegisdiff",
+            headers={"Authorization": f"Bearer {request_token}"},
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+        return resp.json().get("value")
+    except Exception as e:
+        logger.debug("OIDC token request failed (will fall back to repo token): %s", e)
+        return None
+
+
 def _send_to_ingest(
-    ingest_url: str, repo_token: str, verdict, pr_number, commit_sha, repo, scan_ms: int
+    ingest_url: str, auth_token: str, verdict, pr_number, commit_sha, repo, scan_ms: int
 ) -> None:
     """POST scan metadata (no code) to the AegisDiff dashboard ingest endpoint."""
     payload = {
@@ -54,7 +75,7 @@ def _send_to_ingest(
         "pr_url": f"https://github.com/{repo}/pull/{pr_number}" if pr_number else None,
         "scan_ms": scan_ms,
     }
-    headers = {"Authorization": f"Bearer {repo_token}", "Content-Type": "application/json"}
+    headers = {"Authorization": f"Bearer {auth_token}", "Content-Type": "application/json"}
     try:
         resp = httpx.post(ingest_url, json=payload, headers=headers, timeout=10.0)
         resp.raise_for_status()
@@ -135,21 +156,30 @@ def main() -> None:
         print(comment_body)
 
     # Send metadata to dashboard (no code content)
+    # Auth: try OIDC first (zero-config), fall back to legacy repo token
     if not cfg.aegisdiff_ingest_url:
         logger.warning(
             "Dashboard ingest skipped — AEGISDIFF_INGEST_URL not set. "
             "Scan results will NOT appear in the dashboard."
         )
-    if cfg.aegisdiff_ingest_url and cfg.aegisdiff_repo_token:
-        _send_to_ingest(
-            cfg.aegisdiff_ingest_url,
-            cfg.aegisdiff_repo_token,
-            verdict,
-            cfg.pr_number,
-            cfg.commit_sha,
-            cfg.repo,
-            scan_ms,
-        )
+    else:
+        auth_token = _get_oidc_token() or cfg.aegisdiff_repo_token
+        if auth_token:
+            _send_to_ingest(
+                cfg.aegisdiff_ingest_url,
+                auth_token,
+                verdict,
+                cfg.pr_number,
+                cfg.commit_sha,
+                cfg.repo,
+                scan_ms,
+            )
+        else:
+            logger.warning(
+                "Dashboard ingest skipped — no auth token available. "
+                "Set AEGISDIFF_INGEST_URL and ensure id-token: write permission "
+                "or set AEGISDIFF_REPO_TOKEN in GitHub Secrets."
+            )
 
     # Print to GitHub Actions step summary
     try:

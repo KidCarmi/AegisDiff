@@ -23,11 +23,12 @@ on:
   #     - "**.js"
   #     - "**.ts"
 
-# Minimal permissions — read code, write PR comments only
+# Minimal permissions — read code, write PR comments, OIDC token for dashboard auth
 permissions:
   contents: read
   pull-requests: write
   issues: write
+  id-token: write   # Required for GitHub Actions OIDC (zero-config dashboard auth)
 
 jobs:
   appsec-triage:
