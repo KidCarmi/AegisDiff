@@ -15,6 +15,8 @@ import time
 from dataclasses import replace
 from typing import List, Optional
 
+import httpx
+
 from .providers.base import LLMProvider, LLMRequest, LLMResponse
 
 logger = logging.getLogger(__name__)
@@ -48,15 +50,18 @@ class LLMOrchestrator:
         last_exc: Optional[Exception] = None
 
         for provider in self._providers:
-            adapted = self._adapt_request(request, provider)
+            # context_scale tracks adaptive trimming: halved on every 413 response
+            context_scale = 1.0
 
             for attempt in range(1, self._max_retries + 1):
+                adapted = self._adapt_request(request, provider, context_scale)
                 try:
                     logger.info(
-                        "LLM attempt %d/%d via %s",
+                        "LLM attempt %d/%d via %s (context scale %.0f%%)",
                         attempt,
                         self._max_retries,
                         provider.name,
+                        context_scale * 100,
                     )
                     response = provider.complete(adapted)
                     logger.info(
@@ -70,6 +75,21 @@ class LLMOrchestrator:
 
                 except Exception as exc:
                     last_exc = exc
+
+                    # 413 = HTTP payload too large: shrink context and retry
+                    if (
+                        isinstance(exc, httpx.HTTPStatusError)
+                        and exc.response.status_code == 413
+                        and context_scale > 0.12  # stop shrinking below ~12%
+                    ):
+                        context_scale *= 0.5
+                        logger.warning(
+                            "413 Payload Too Large from %s — shrinking context to %.0f%% and retrying",
+                            provider.name,
+                            context_scale * 100,
+                        )
+                        continue  # retry same provider with smaller context
+
                     if not provider.is_retryable_error(exc):
                         logger.warning(
                             "Non-retryable error from %s: %s — rotating provider",
@@ -102,19 +122,27 @@ class LLMOrchestrator:
         base = min(BACKOFF_BASE**attempt, BACKOFF_MAX)
         return base * (1 + random.uniform(-BACKOFF_JITTER, BACKOFF_JITTER))
 
-    def _adapt_request(self, request: LLMRequest, provider: LLMProvider) -> LLMRequest:
+    def _adapt_request(
+        self,
+        request: LLMRequest,
+        provider: LLMProvider,
+        context_scale: float = 1.0,
+    ) -> LLMRequest:
         """
-        Trim the <<<CODE>>> ... <<<END_CODE>>> block if the request would exceed
-        the provider's context window.  This is critical when falling back from
-        Gemini (900k tokens) to Groq (7k tokens).
+        Trim the <<<CODE>>> ... <<<END_CODE>>> block so the request fits within
+        the provider's context window.
+
+        context_scale: multiplier applied to max_context_tokens (1.0 = full,
+        0.5 = half, etc.). Decreased automatically on 413 responses.
         """
+        effective_max = int(provider.max_context_tokens * context_scale)
         # Rough approximation: 1 token ≈ 4 characters
         estimated_tokens = (len(request.system_prompt) + len(request.user_message)) // 4
 
-        if estimated_tokens <= provider.max_context_tokens:
+        if estimated_tokens <= effective_max:
             return request
 
-        budget_chars = provider.max_context_tokens * 4
+        budget_chars = effective_max * 4
         system_chars = len(request.system_prompt)
         available = budget_chars - system_chars - 500  # 500-char overhead buffer
 
@@ -126,13 +154,15 @@ class LLMOrchestrator:
             prefix = user_msg[: code_start + len("<<<CODE>>>")]
             suffix = user_msg[code_end:]
             code_block = user_msg[code_start + len("<<<CODE>>>") : code_end]
-            truncated = code_block[:available] + "\n\n[...TRUNCATED — context limit reached...]"
+            max_block = max(available, 200)  # always keep at least 200 chars
+            truncated = code_block[:max_block] + "\n\n[...TRUNCATED — context limit reached...]"
             user_msg = prefix + truncated + suffix
             logger.warning(
-                "Context trimmed from ~%d → ~%d tokens for provider %s",
+                "Context trimmed from ~%d → ~%d effective tokens for provider %s (scale=%.0f%%)",
                 estimated_tokens,
-                provider.max_context_tokens,
+                effective_max,
                 provider.name,
+                context_scale * 100,
             )
 
         return replace(request, user_message=user_msg)

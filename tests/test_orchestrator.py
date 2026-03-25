@@ -132,6 +132,81 @@ class TestContextAdaptation:
         assert actual.user_message == SAMPLE_REQUEST.user_message
 
 
+class TestAdaptive413Trimming:
+    """413 Payload Too Large triggers adaptive context halving and retry."""
+
+    def _make_413(self):
+        return httpx.HTTPStatusError(
+            "413 Payload Too Large",
+            request=MagicMock(),
+            response=MagicMock(status_code=413),
+        )
+
+    def test_413_triggers_context_halving_then_succeeds(self):
+        provider = make_mock_provider("groq", max_tokens=100)
+        provider.complete.side_effect = [
+            self._make_413(),
+            make_response("groq"),
+        ]
+        provider.is_retryable_error.return_value = False
+
+        long_code = "x" * 5000
+        request = LLMRequest(
+            system_prompt="System.",
+            user_message=f"<<<CODE>>>{long_code}<<<END_CODE>>>",
+        )
+
+        orch = LLMOrchestrator([provider], max_retries_per_provider=4)
+        resp = orch.complete(request)
+
+        assert resp.provider == "groq"
+        assert provider.complete.call_count == 2
+        # Second call must have a smaller message than the first
+        first_msg = provider.complete.call_args_list[0][0][0].user_message
+        second_msg = provider.complete.call_args_list[1][0][0].user_message
+        assert len(second_msg) <= len(first_msg)
+
+    def test_413_repeated_halving_eventually_fits(self):
+        """Verify up to 3 halvings (1.0 → 0.5 → 0.25 → 0.125) before success."""
+        provider = make_mock_provider("groq", max_tokens=10_000)
+        provider.complete.side_effect = [
+            self._make_413(),
+            self._make_413(),
+            make_response("groq"),
+        ]
+        provider.is_retryable_error.return_value = False
+
+        long_code = "y" * 200_000
+        request = LLMRequest(
+            system_prompt="Sys.",
+            user_message=f"<<<CODE>>>{long_code}<<<END_CODE>>>",
+        )
+
+        orch = LLMOrchestrator([provider], max_retries_per_provider=5)
+        resp = orch.complete(request)
+        assert resp.provider == "groq"
+        assert provider.complete.call_count == 3
+
+    def test_413_exhausted_falls_back_to_next_provider(self):
+        """After too many halvings, rotate to the next provider."""
+        groq = make_mock_provider("groq", max_tokens=1)
+        # Always 413 — context_scale will shrink below 0.12 threshold
+        groq.complete.side_effect = self._make_413()
+        groq.is_retryable_error.return_value = False
+
+        gemini = make_mock_provider("gemini", max_tokens=900_000)
+        gemini.complete.return_value = make_response("gemini")
+        gemini.is_retryable_error.return_value = False
+
+        request = LLMRequest(
+            system_prompt="S.",
+            user_message="<<<CODE>>>" + "z" * 100 + "<<<END_CODE>>>",
+        )
+        orch = LLMOrchestrator([groq, gemini], max_retries_per_provider=10)
+        resp = orch.complete(request)
+        assert resp.provider == "gemini"
+
+
 class TestInitialization:
     def test_empty_providers_raises(self):
         with pytest.raises(ValueError, match="At least one"):
