@@ -2,10 +2,10 @@
 
 ## What Is This?
 
-AegisDiff is a **zero-cost autonomous AppSec triage engine**. It analyzes pull request
-diffs for security vulnerabilities using an AI "cynical AppSec engineer" — one that
-tries to DISPROVE vulnerabilities rather than confirm them. Verdicts are posted as
-GitHub PR comments and scan metadata is sent to a Next.js dashboard.
+AegisDiff is a **managed SaaS AppSec triage platform**. The operator (KidCarmi)
+hosts a single Vercel + Neon deployment. Users sign in with GitHub OAuth, connect
+their repos, and get PR security scanning with zero configuration. The operator
+manages the LLM API keys and rate limits. Users never need their own AI keys.
 
 ## $0/Month Constraint
 
@@ -16,16 +16,15 @@ This is a hard requirement. Every architectural decision must preserve this.
 ## Repository Structure
 
 ```
-aegisdiff/       Python triage engine (runs in GitHub Actions)
-web/             Next.js 14 App Router dashboard (deploy to Vercel)
-landing/         Static landing page (deploy to Cloudflare Pages)
-tests/           Pytest unit tests + security fixtures
-  fixtures/      .diff files covering 9 CWE classes (see below)
+aegisdiff/       Python triage engine (runs in user's GitHub Actions)
+web/             Next.js 14 App Router dashboard (operator hosts on Vercel)
+landing/         Static landing page (Cloudflare Pages)
+tests/           Pytest unit tests + 10 security diff fixtures
 scripts/         local_scan.py for manual testing
 .github/
   workflows/
-    aegisdiff.yml      Main triage workflow (pull_request trigger)
-    ci.yml             Canary scan + self-scan + lint/test
+    aegisdiff.yml      Triage workflow (users copy this to their repos)
+    ci.yml             Canary + self-scan + lint/test (this repo's CI)
     security.yml       SAST/SCA pipeline (Semgrep, Bandit, Trivy, Gitleaks)
     cleanup.yml        Daily DB retention cleanup
 ```
@@ -33,42 +32,82 @@ scripts/         local_scan.py for manual testing
 ## Key Design Rules — DO NOT VIOLATE
 
 1. **Never store code in the database.** The Neon DB stores only metadata: verdict,
-   severity, CWE ID, confidence, title, provider, timing. No code quotes, no diffs,
-   no evidence strings. Evidence lives ONLY in the GitHub PR comment.
+   severity, CWE ID, confidence, title, provider, timing. No code, no diffs, no
+   evidence strings. Evidence lives ONLY in the GitHub PR comment.
 
 2. **LLM provider priority is Gemini first, Groq second.** This order is set in
-   `aegisdiff/entrypoint.py` and must not be reversed. Groq's limited context
-   makes it unsuitable as primary for large diffs.
+   `aegisdiff/entrypoint.py` and must not be reversed.
 
-3. **Verdict JSON schema is backwards-compatible.** The `parse_verdict()` function in
-   `aegisdiff/triage/verdicts.py` must always handle missing keys gracefully. New
-   fields can be added but existing fields cannot be removed or renamed.
+3. **Verdict JSON schema is backwards-compatible.** `parse_verdict()` in
+   `aegisdiff/triage/verdicts.py` must always handle missing keys gracefully.
+   Fields can be added, never removed or renamed.
 
-4. **All secrets via environment variables, never hardcoded.** See `aegisdiff/config.py`
-   for the full list. In the dashboard, `NEXTAUTH_SECRET` is used for session signing.
+4. **All secrets via environment variables, never hardcoded.**
 
-5. **The confidence calibration rules in `verdicts.py` are non-negotiable:**
+5. **Confidence calibration rules in `verdicts.py` are non-negotiable:**
    - `TRUE_POSITIVE` requires `confidence >= 0.7`
    - `confidence < 0.5` forces `NEEDS_REVIEW`
-   These rules protect against hallucinated high-confidence verdicts.
 
 6. **`Verdict.error(reason)` uses reason as the title (truncated to 80 chars).**
-   Never hardcode "Analysis engine error" — the actual failure reason must be visible
-   in the dashboard so users can debug without reading Actions logs.
+   Never hardcode "Analysis engine error" — the actual failure reason must be
+   visible in the dashboard.
 
-7. **Auth is OIDC-first.** The entrypoint calls `_get_oidc_token()` first, falls back
-   to `AEGISDIFF_REPO_TOKEN` only for legacy repos. New installs need only
-   `AEGISDIFF_INGEST_URL`. Do not add new token-based auth paths.
+7. **Auth is OIDC-first.** `_get_oidc_token()` runs first. Falls back to
+   `AEGISDIFF_REPO_TOKEN` only for legacy repos.
 
-8. **Platform key distribution is the zero-config path.** After Phase 0 ships,
-   the engine must NOT hard-exit when no user LLM keys are configured — it must
-   first try `/api/llm-token` (OIDC-authenticated). Only exit if both user keys
-   AND platform keys are unavailable. User-provided keys always take priority
-   and bypass the 50/day rate limit.
+8. **Platform key distribution is the zero-config path.** The engine must NOT
+   hard-exit when no user LLM keys are configured — it must first try
+   `/api/llm-token` (OIDC-authenticated). Only exit if both user keys AND
+   platform keys are unavailable. User-provided keys always take priority.
 
-8. **Groq context budget is 5,500 tokens.** The orchestrator halves `context_scale`
-   on 413 responses (1.0 → 0.5 → 0.25 → 0.125) and retries the same provider before
-   rotating. Do not raise this limit without testing against large real-world diffs.
+9. **RBAC is derived from GitHub — never store role assignments in the DB.**
+   Roles are resolved at request time from the GitHub API (org membership,
+   repo permissions) and cached per session. No `memberships` table needed.
+
+## RBAC Model
+
+Roles are resolved from the GitHub API on every session, not stored in DB.
+
+| Role | Source | Permissions |
+|---|---|---|
+| `platform:admin` | `PLATFORM_ADMIN_GITHUB_IDS` env var (comma-separated) | Everything + admin panel |
+| `org:owner` | GitHub org owner | All repos in org, org settings |
+| `repo:admin` | GitHub repo admin permission | Repo settings, webhooks, ignore rules |
+| `repo:developer` | GitHub repo write permission | View scans, feedback, rescan |
+| `repo:viewer` | GitHub repo read permission | View scans (read-only) |
+
+**Resolution function** (implement in `web/lib/rbac.ts`):
+```typescript
+type Role = "platform:admin" | "org:owner" | "repo:admin" | "repo:developer" | "repo:viewer" | null;
+
+async function resolveRole(
+  session: Session,         // NextAuth session (github_id, access_token)
+  owner: string,            // repo owner or org name
+  repo?: string,            // optional — if omitted, resolves org-level role
+): Promise<Role>
+```
+
+Resolution order (first match wins):
+1. If `session.github_id` is in `PLATFORM_ADMIN_GITHUB_IDS` → `platform:admin`
+2. Call `GET /orgs/{owner}/memberships/{username}` → if `role=owner` → `org:owner`
+3. If `repo` provided, call `GET /repos/{owner}/{repo}/collaborators/{username}/permission`
+   - `admin` → `repo:admin`
+   - `write` → `repo:developer`
+   - `read` → `repo:viewer`
+4. Return `null` (no access)
+
+Cache: store resolved role in the Next.js session JWT (5-minute TTL).
+Never trust a role claim from the client — always re-resolve from GitHub API.
+
+**Middleware** (`web/middleware.ts`): protect routes by minimum required role:
+```
+/dashboard            → repo:viewer or higher
+/repos/[o]/[n]        → repo:viewer or higher for that repo
+/repos/[o]/[n]/...    → repo:admin for settings routes
+/admin                → platform:admin only
+/api/admin/*          → platform:admin only
+/api/repos/[o]/[n]/*  → repo:admin for mutations, repo:viewer for reads
+```
 
 ## Dev Commands
 
@@ -76,25 +115,20 @@ scripts/         local_scan.py for manual testing
 # Python engine
 pip install -e .[dev]           # Install with dev dependencies
 pytest                          # Run all tests (63 tests, ~0.4s)
-pytest tests/test_orchestrator.py -v  # Run specific test file
-ruff check aegisdiff/           # Lint (must pass — CI gate)
+pytest tests/test_orchestrator.py -v
+ruff check aegisdiff/           # Lint (CI gate — must pass)
 ruff format aegisdiff/          # Format
 
-# Local scan (against a local diff file)
+# Local scan
 python scripts/local_scan.py --diff path/to/file.diff
 
 # Dashboard
-cd web
-npm install
+cd web && npm install
 npm run dev                     # http://localhost:3000
 npm run build                   # Production build
 ```
 
 ## Test Fixtures
-
-All fixtures live in `tests/fixtures/`. Each is a `.diff` file representing a real
-vulnerability class. Tests in `test_engine.py` are grouped by CWE class and use mock
-orchestrators — no real LLM calls are made in unit tests.
 
 | Fixture | CWE | Expected Verdict |
 |---|---|---|
@@ -109,219 +143,199 @@ orchestrators — no real LLM calls are made in unit tests.
 | `open_redirect.diff` | CWE-601 | TRUE_POSITIVE |
 | `safe.diff` | — | FALSE_POSITIVE |
 
-When adding a new fixture: add the `.diff` file, add a fixture in `conftest.py`,
-add a test class in `test_engine.py` following the existing CWE class pattern.
-
 ## Critical Files
 
 | File | Purpose |
 |---|---|
-| `aegisdiff/llm/orchestrator.py` | Failover + retry + adaptive 413 context trimming |
-| `aegisdiff/llm/providers/groq.py` | Groq provider (max_context_tokens = 5,500) |
-| `aegisdiff/llm/providers/gemini.py` | Gemini provider (max_context_tokens = 900k) |
-| `aegisdiff/code_context/extractor.py` | AST parsing, sink/source detection |
-| `aegisdiff/triage/prompts.py` | Cynical AppSec system prompt (quality driver) |
+| `aegisdiff/llm/orchestrator.py` | Failover + retry + adaptive 413 trimming |
+| `aegisdiff/llm/providers/groq.py` | Groq (max_context_tokens = 5,500) |
+| `aegisdiff/llm/providers/gemini.py` | Gemini (max_context_tokens = 900k) |
+| `aegisdiff/code_context/extractor.py` | AST sink/source detection |
+| `aegisdiff/triage/prompts.py` | Cynical AppSec system prompt |
 | `aegisdiff/triage/verdicts.py` | Verdict parsing + calibration rules |
-| `aegisdiff/entrypoint.py` | Entry point: OIDC auth + ingest + PR comment |
+| `aegisdiff/entrypoint.py` | OIDC auth + platform key fetch + PR comment |
 | `aegisdiff/config.py` | All env var loading |
-| `.github/workflows/aegisdiff.yml` | Workflow trigger + diff generation |
-| `.github/workflows/ci.yml` | Canary + self-scan + lint/test |
-| `.github/workflows/security.yml` | SAST/SCA security pipeline |
-| `web/app/api/ingest/route.ts` | Receives scan metadata, fires webhooks, creates Issues |
-| `web/app/api/v1/scans/route.ts` | Public REST API (Bearer ak_ keys) |
-| `web/instrumentation.ts` | Auto-applies all DB migrations on cold start |
-| `web/lib/db.ts` | Neon DB client + schema SQL |
+| `.github/workflows/aegisdiff.yml` | User-facing triage workflow |
+| `web/app/api/ingest/route.ts` | Receives scan metadata, fires webhooks |
+| `web/app/api/llm-token/route.ts` | Platform key distribution (Phase 0) |
+| `web/lib/rbac.ts` | Role resolution from GitHub API (Phase 1) |
+| `web/instrumentation.ts` | Auto-applies DB migrations on cold start |
+| `web/lib/db.ts` | Neon client + schema SQL |
 
 ## Dashboard API Surface
 
 ```
-POST /api/ingest              Scan metadata from GitHub Actions (OIDC or Bearer)
-GET  /api/repos               List repos for the session user
-GET  /api/scans               Scan history (filters: repo, verdict, limit)
-GET  /api/scans/export        CSV or SARIF 2.1.0 export
-GET  /api/v1/scans            Public REST API (Bearer ak_ key required)
-GET  /api/v1/key              Manage public API key
-GET|PATCH /api/repos/[o]/[n]/slack     Slack webhook
-GET|PATCH /api/repos/[o]/[n]/discord   Discord webhook
-GET|PATCH /api/repos/[o]/[n]/teams     MS Teams webhook
-GET|PATCH /api/repos/[o]/[n]/notify    Notification thresholds
-GET|POST|DELETE /api/repos/[o]/[n]/ignore  Ignore rules
-GET  /api/audit               Last 200 audit events
-POST /api/admin/migrate       One-time manual migration (ADMIN_SECRET required)
+# Public (OIDC auth from GitHub Actions)
+GET  /api/llm-token           Platform AI key distribution
+POST /api/ingest              Scan metadata ingestion
+
+# User-facing (NextAuth session, RBAC enforced)
+GET  /api/repos               List repos (viewer+)
+GET  /api/scans               Scan history (viewer+)
+GET  /api/scans/export        CSV or SARIF export (viewer+)
+POST /api/scans/[id]/feedback Wrong verdict correction (developer+)
+GET|PATCH /api/repos/[o]/[n]/slack     Slack webhook (admin)
+GET|PATCH /api/repos/[o]/[n]/discord   Discord webhook (admin)
+GET|PATCH /api/repos/[o]/[n]/teams     MS Teams webhook (admin)
+GET|PATCH /api/repos/[o]/[n]/notify    Notification thresholds (admin)
+GET|POST|DELETE /api/repos/[o]/[n]/ignore  Ignore rules (admin)
+GET  /api/audit               Audit log (admin+)
+
+# Platform admin (platform:admin only)
+GET  /api/admin/stats         Platform-wide usage stats
+POST /api/admin/migrate       Manual DB migration
+POST /api/admin/rate-limit    Override rate limit for a repo/org
+GET  /api/admin/users         User list + role view
+
+# External
+GET  /api/v1/scans            Public REST API (Bearer ak_ key)
+GET|POST|DELETE /api/v1/key   Manage public API key
 ```
 
-## DB Schema (Neon PostgreSQL)
+## DB Schema
 
-Tables managed by `web/instrumentation.ts` (idempotent `ALTER TABLE IF NOT EXISTS`):
-
-- `installations` — GitHub App installs (owner, install_id)
-- `repos` — connected repos + integration settings (slack/discord/teams webhooks,
-  notify thresholds, auto_github_issue flag)
-- `scans` — scan metadata (verdict, severity, cwe_id, confidence, title, provider,
-  scan_ms, pr_number, commit_sha, pr_url, repo_owner, repo_name, created_at)
-- `api_keys` — public REST API keys (key_hash SHA-256, name, last_used_at)
-- `ignore_rules` — per-repo suppression rules (cwe_id or title_keyword)
-- `audit_log` — action history (user, action, detail, created_at)
-
+Tables managed by `web/instrumentation.ts` (idempotent `ALTER TABLE IF NOT EXISTS`).
 **Never add code/diff/evidence columns to any table.**
 
-## Modifying the System Prompt
+- `users` — GitHub OAuth users (github_id, username, email)
+- `installations` — GitHub App installs (installation_id, account_login)
+- `repos` — connected repos + integration settings (webhooks, thresholds)
+- `scans` — scan metadata only (verdict, severity, cwe_id, confidence, title,
+  provider, scan_ms, pr_number, commit_sha, pr_url)
+- `api_keys` — public REST API keys (key_hash SHA-256)
+- `ignore_rules` — per-repo suppression (cwe_id or title_keyword)
+- `audit_log` — action history (user, action, detail, created_at)
+- `scan_feedback` — developer verdict corrections (Phase 5)
 
-The system prompt is in `aegisdiff/triage/prompts.py` → `APPSEC_SYSTEM_PROMPT`.
-It is the most important piece of the system. Changes must:
-- Preserve the JSON verdict schema exactly (field names and types)
-- Preserve the calibration rules section
-- Not make the model more permissive (avoid relaxing the NEEDS_REVIEW triggers)
+Note: **No `memberships` table.** RBAC is resolved from GitHub API at runtime.
 
 ## Phases Roadmap
 
-Work through phases in order. Do not start a phase until the previous is complete
-and all tests pass.
+Work through phases in order. All tests must pass before starting the next phase.
 
-### Phase 0 — Platform Key Distribution (TRUE zero-config)
+### Phase 0 — Platform Key Distribution
 
-**Goal:** Users add only `AEGISDIFF_INGEST_URL`. No `GEMINI_API_KEY`, no `GROQ_API_KEY`.
-AegisDiff distributes its own platform LLM keys to authenticated runners via OIDC.
-User-provided keys always win (no rate limit). Platform keys are rate-limited (50/day/repo).
+**Goal:** Users need zero secrets — not even `GEMINI_API_KEY`. The engine
+fetches platform LLM keys from `/api/llm-token` via OIDC. LLM calls still
+made FROM the user's runner. Code never leaves GitHub.
 
-**Privacy preserved:** Keys travel to the GitHub Actions runner. LLM calls are made
-FROM the runner. The diff never leaves GitHub — only OIDC tokens reach AegisDiff.
+**New Vercel env vars (operator sets these once):**
+- `PLATFORM_GEMINI_API_KEY` — operator's Gemini key
+- `PLATFORM_GROQ_API_KEY` — operator's Groq key
+- `PLATFORM_ADMIN_GITHUB_IDS` — comma-separated GitHub user IDs with admin access
 
-**New Vercel env vars (set by the AegisDiff operator):**
-- `PLATFORM_GEMINI_API_KEY` — AegisDiff's own Gemini key
-- `PLATFORM_GROQ_API_KEY` — AegisDiff's own Groq key
+**`web/app/api/llm-token/route.ts`:**
+- `GET` with `Authorization: Bearer <oidc-jwt>`
+- Call `verifyOIDC(token)` → get `repo` claim
+- Count scans for this repo in last 24h from `scans` table
+- If count ≥ 50 → return 429 `{ error: "Rate limit: 50 scans/day on free tier" }`
+- Return `{ gemini_key, groq_key, expires_at }` (exp = 5 min from now)
+- Write to `audit_log`: action `"llm_key_issued"`, detail = repo
 
-**New endpoint — `web/app/api/llm-token/route.ts`:**
-```
-GET /api/llm-token
-Authorization: Bearer <github-oidc-jwt>
+**`aegisdiff/entrypoint.py` changes:**
+- Add `_fetch_platform_keys(ingest_url, oidc_token) -> dict`
+- In `main()`: before the `sys.exit(1)` on missing keys, try platform keys
+- If platform keys are available, build providers with them
+- User-provided keys always checked first — skip platform fetch if set
+- On 429 from platform: log clearly, exit 1 with actionable message
 
-Response 200:
-{ "gemini_key": "...", "groq_key": "...", "expires_at": "<ISO>" }
+**`aegisdiff/config.py`:** No change needed.
 
-Response 429:
-{ "error": "Rate limit: 50 scans/day per repo on free tier" }
-```
-- Verify OIDC JWT (same `verifyOIDC()` used by `/api/ingest`)
-- Count `scans` rows for this repo in the last 24 hours
-- If count >= 50, return 429 with a clear message
-- Otherwise return `PLATFORM_GEMINI_API_KEY` + `PLATFORM_GROQ_API_KEY` from env
-- Write the key fetch to `audit_log` (action: "llm_key_issued")
+**`.github/workflows/aegisdiff.yml`:** Remove `GEMINI_API_KEY`/`GROQ_API_KEY`
+from required secrets documentation. Keep as optional override.
 
-**Changes to `aegisdiff/entrypoint.py`:**
-```python
-def _fetch_platform_keys(ingest_url: str, oidc_token: str) -> dict:
-    """Fetch platform LLM keys from AegisDiff when user has none configured."""
-    base = ingest_url.removesuffix("/api/ingest").rstrip("/")
-    resp = httpx.get(
-        f"{base}/api/llm-token",
-        headers={"Authorization": f"Bearer {oidc_token}"},
-        timeout=10.0,
-    )
-    if resp.status_code == 429:
-        logger.warning("Platform key rate limit reached: %s", resp.json().get("error"))
-        return {}
-    resp.raise_for_status()
-    return resp.json()
-```
+**Tests (`tests/test_entrypoint.py`):**
+- User keys present → `_fetch_platform_keys` never called
+- No user keys + ingest URL → `_fetch_platform_keys` called with OIDC token
+- Platform returns 429 → `sys.exit(1)` with clear message
+- Platform returns keys → providers built, scan proceeds
 
-In `main()`, replace the hard exit when no keys are found:
-```python
-# Try platform keys before giving up
-if not cfg.gemini_api_key and not groq_keys and cfg.aegisdiff_ingest_url:
-    oidc = _get_oidc_token()
-    if oidc:
-        platform = _fetch_platform_keys(cfg.aegisdiff_ingest_url, oidc)
-        gemini_key = platform.get("gemini_key", "")
-        groq_key = platform.get("groq_key", "")
-        if not gemini_key and not groq_key:
-            logger.error("No keys available (platform rate limit or no AEGISDIFF_INGEST_URL)")
-            sys.exit(1)
-        # rebuild providers with platform keys
-        ...
-```
+### Phase 1 — RBAC
 
-**Changes to `aegisdiff/config.py`:** No change needed — the platform key fetch
-happens in `entrypoint.py` after config load, before provider construction.
+**Goal:** Role-based access control derived from GitHub permissions. Platform
+admin panel. No manual role assignments — GitHub is the source of truth.
 
-**Changes to `.github/workflows/aegisdiff.yml`:**
-- Remove `GEMINI_API_KEY` and `GROQ_API_KEY` from the required secrets docs
-- Keep them as optional pass-through (if set, they take priority)
-- Update the `Run AegisDiff triage` step comment
+**`web/lib/rbac.ts`:**
+- `resolveRole(session, owner, repo?)` — see RBAC Model section above
+- `requireRole(minRole)` — Next.js middleware helper, returns 403 if insufficient
+- Cache resolved role in JWT claims (re-verify on session refresh)
 
-**Rate limit table (stored in DB `scans`, not a separate table):**
-```sql
-SELECT COUNT(*) FROM scans
-WHERE repo_owner = $1 AND repo_name = $2
-  AND created_at > NOW() - INTERVAL '24 hours'
-```
+**`web/middleware.ts`:** Route protection table (see RBAC Model section).
 
-**Tests:**
-- `tests/test_entrypoint.py` — mock `_fetch_platform_keys`, verify it's called when
-  no user keys are set; verify user keys skip the fetch entirely
-- Test 429 handling: engine exits 1 with a clear message, not a traceback
+**`web/app/admin/page.tsx`:** Platform admin dashboard:
+- Total scans (today / 7d / 30d)
+- Top repos by scan count
+- Rate-limited repos list
+- User list with role + last active
+- Override rate limit form
 
-### Phase 1 — Inline PR Review Comments
-**Goal:** Post findings as inline review comments pinned to the exact vulnerable line,
-not just a top-level PR comment.
+**API changes:** Add `requireRole` checks to all mutation endpoints.
 
-- `aegisdiff/github/client.py` — add `create_review_with_comments(pr, commit_sha, comments)`
-- `aegisdiff/triage/verdicts.py` — add `line_number: Optional[int]` to Verdict
-- `aegisdiff/code_context/extractor.py` — ensure sink line number is always populated
-- `aegisdiff/entrypoint.py` — call `create_review_with_comments` when line number available;
-  fall back to top-level comment when line number is unknown
-- `aegisdiff/github/pr_comment.py` — keep top-level comment as summary; inline comment
-  contains the evidence quote and remediation
-- Tests: add `test_github_client.py` covering review comment creation (mock GitHub API)
+**Tests:** Mock GitHub API responses, verify role resolution and route protection.
 
-### Phase 2 — Per-Hunk Analysis
-**Goal:** Analyze each changed file independently for large PRs; aggregate results.
+### Phase 2 — Inline PR Review Comments
 
-- `aegisdiff/triage/engine.py` — add `analyze_diff_chunked(diff)`: splits by
-  `diff --git` headers, analyzes each file diff separately, returns list of Verdicts
-- Aggregate: if any chunk is TRUE_POSITIVE, overall is TRUE_POSITIVE (highest severity wins)
-- `aegisdiff/entrypoint.py` — use chunked analysis when diff > 100 lines
-- Dashboard: ingest accepts array of scan results for one PR (one row per finding)
-- Tests: fixture with 3-file diff where one file is safe and one is vulnerable
+**Goal:** Findings posted as inline comments on the exact vulnerable line.
 
-### Phase 3 — `aegisdiff-ignore` Inline Suppression
-**Goal:** Developers suppress known FPs with a comment directly in code.
+- `aegisdiff/github/client.py` — add `create_review(pr, commit_sha, comments[])`
+- `aegisdiff/triage/verdicts.py` — add `line_number: Optional[int]`
+- `aegisdiff/code_context/extractor.py` — ensure sink line number always set
+- `aegisdiff/entrypoint.py` — use review when line number known; top-level fallback
+- Top-level comment becomes a summary only (verdict + severity + CWE)
+- Inline comment contains evidence quote + remediation
 
-- Pattern: `# aegisdiff-ignore: CWE-89 reason: test-only code`
-  (also `// aegisdiff-ignore:` for JS/TS)
-- `aegisdiff/code_context/extractor.py` — scan diff lines for ignore comments;
-  annotate affected sinks as suppressed
-- `aegisdiff/triage/engine.py` — if sink is suppressed, return FALSE_POSITIVE
-  with `false_positive_reason = "Suppressed by aegisdiff-ignore comment"`
+### Phase 3 — Per-Hunk Analysis
+
+**Goal:** Analyze each changed file independently. Aggregate results.
+
+- `aegisdiff/triage/engine.py` — `analyze_diff_chunked(diff)`: split by
+  `diff --git` headers, analyze each independently, return list of Verdicts
+- Aggregate: highest severity wins for overall PR status
+- `aegisdiff/entrypoint.py` — chunked mode when diff > 100 lines
+- Dashboard ingest accepts array (one row per finding per PR)
+
+### Phase 4 — `aegisdiff-ignore` Inline Suppression
+
+**Goal:** `# aegisdiff-ignore: CWE-89 reason: test-only` silences a finding.
+
+- `aegisdiff/code_context/extractor.py` — detect ignore comments on/above sinks
+- `aegisdiff/triage/engine.py` — suppressed sink → FALSE_POSITIVE with reason
 - `web/app/api/ingest/route.ts` — write suppression to `ignore_rules` table
-- Tests: fixture with ignore comment on the vulnerable line
 
-### Phase 4 — Feedback Loop ("Wrong verdict" button)
-**Goal:** Developers can correct verdicts from the dashboard; corrections feed back
-into ignore rules and future prompt calibration.
+### Phase 5 — Feedback Loop
+
+**Goal:** "Wrong verdict" button lets developers correct FPs/FNs.
 
 - `web/app/api/scans/[id]/feedback/route.ts` — POST `{correct_verdict, reason}`
-- `web/components/ScanCard.tsx` — add thumbs up/down UI
-- On FALSE_POSITIVE feedback for a TRUE_POSITIVE: auto-add to `ignore_rules`
-- On TRUE_POSITIVE feedback for a FALSE_POSITIVE: flag for manual review
-- Write all feedback to `audit_log`
-- Future: export feedback corpus for prompt fine-tuning
+- `web/components/ScanCard.tsx` — thumbs up/down UI (developer+ role only)
+- FALSE_POSITIVE feedback on TRUE_POSITIVE → auto-add to `ignore_rules`
+- All corrections written to `audit_log` + new `scan_feedback` table
 
-### Phase 5 — Re-scan on Demand
-**Goal:** `@aegisdiff rescan` PR comment triggers a fresh scan without pushing a commit.
+### Phase 6 — Re-scan on Demand
 
-- `web/app/api/webhooks/github/route.ts` — handle `issue_comment` webhook event;
-  detect `@aegisdiff rescan` (case-insensitive)
-- Trigger `aegisdiff.yml` via `repository_dispatch` event
-- Rate-limit: max 3 rescans per PR per hour (tracked in `audit_log`)
-- Post acknowledgement comment: "Re-scan triggered — results in ~90s"
+**Goal:** `@aegisdiff rescan` triggers a fresh scan without pushing a commit.
+
+- `web/app/api/webhooks/github/route.ts` — handle `issue_comment` event
+- Detect `@aegisdiff rescan` (case-insensitive)
+- Trigger `aegisdiff.yml` via `repository_dispatch`
+- Rate-limit: max 3 rescans/PR/hour (check `audit_log`)
+- Post ack comment: "Re-scan queued — results in ~90s"
+
+## Modifying the System Prompt
+
+`aegisdiff/triage/prompts.py` → `APPSEC_SYSTEM_PROMPT` is the quality driver.
+Changes must:
+- Preserve the JSON verdict schema exactly
+- Preserve the calibration rules section
+- Not relax the NEEDS_REVIEW triggers
 
 ## Adding a New LLM Provider
 
 1. Create `aegisdiff/llm/providers/your_provider.py` implementing `LLMProvider`
 2. Set `name`, `model`, `max_context_tokens` class attributes
 3. Implement `complete(request) -> LLMResponse` and `is_retryable_error(exc) -> bool`
-4. Ensure `is_retryable_error` returns `False` for 413 (handled by orchestrator)
-5. Add the provider to the list in `aegisdiff/entrypoint.py` (after Groq)
-6. Add the API key to `aegisdiff/config.py`
-7. Update `.github/workflows/aegisdiff.yml` to pass the new key as an env var
+4. Ensure `is_retryable_error` returns `False` for 413 (orchestrator handles it)
+5. Add to provider list in `aegisdiff/entrypoint.py` (after Groq)
+6. Add API key to `aegisdiff/config.py`
+7. Add key to `PLATFORM_*` env vars in Vercel
+8. Update `.github/workflows/aegisdiff.yml` env vars
