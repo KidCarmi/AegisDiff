@@ -43,7 +43,7 @@ jobs:
 
   # ── Job 2: canary — always scan the known-vulnerable fixture ─────────────
   # Sends a real scan result to the dashboard on every push so the GUI always
-  # has data. Expected verdict: TRUE_POSITIVE (SQLi in sample.diff).
+  # has data. Expected verdict: TRUE_POSITIVE (cmd injection + path traversal in sample.diff).
   # continue-on-error keeps CI green — this is a metric, not a gate.
   canary:
     name: Canary Scan (fixture)
@@ -72,7 +72,7 @@ jobs:
             | python3 -c "import sys,json; print(json.load(sys.stdin)['value'])")
           echo "token=$OIDC_TOKEN" >> "$GITHUB_OUTPUT"
 
-      - name: Run canary scan (sample.diff — known SQLi)
+      - name: Run canary scan (sample.diff — cmd injection + path traversal)
         continue-on-error: true   # Metric only — never blocks CI
         env:
           GEMINI_API_KEY:       ${{ secrets.GEMINI_API_KEY }}
@@ -90,7 +90,7 @@ jobs:
         if: always()
         run: |
           echo "### Canary Scan — \`tests/fixtures/sample.diff\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "Expected: **TRUE_POSITIVE** (SQLi + cmd injection)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Expected: **TRUE_POSITIVE** (cmd injection + path traversal)" >> "$GITHUB_STEP_SUMMARY"
           if [ -f /tmp/step_summary.md ]; then
             cat /tmp/step_summary.md >> "$GITHUB_STEP_SUMMARY"
           fi
