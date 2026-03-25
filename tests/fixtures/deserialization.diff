@@ -1,0 +1,21 @@
+diff --git a/app/api.py b/app/api.py
+index 1234567..abcdefg 100644
+--- a/app/api.py
++++ b/app/api.py
+@@ -1,7 +1,18 @@
+ from django.http import JsonResponse
++import pickle
++import yaml
+
+ def status(request):
+     return JsonResponse({"ok": True})
+
++def restore_session(request):
++    session_data = request.body
++    obj = pickle.loads(session_data)
++    return JsonResponse({"restored": str(obj)})
++
++def load_config(request):
++    raw = request.body.decode()
++    cfg = yaml.load(raw)
++    return JsonResponse(cfg)

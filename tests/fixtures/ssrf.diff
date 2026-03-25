@@ -1,0 +1,21 @@
+diff --git a/app/webhooks.py b/app/webhooks.py
+index 1234567..abcdefg 100644
+--- a/app/webhooks.py
++++ b/app/webhooks.py
+@@ -1,7 +1,15 @@
+ from django.http import JsonResponse
++import requests
+
+ def ping(request):
+     return JsonResponse({"status": "ok"})
+
++def webhook_test(request):
++    url = request.POST.get('url')
++    timeout = int(request.POST.get('timeout', 5))
++    resp = requests.get(url, timeout=timeout)
++    return JsonResponse({"status": resp.status_code, "body": resp.text[:500]})
++
++def fetch_avatar(request):
++    image_url = request.GET.get('avatar_url')
++    data = requests.get(image_url).content
++    return JsonResponse({"size": len(data)})

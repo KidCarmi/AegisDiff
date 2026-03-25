@@ -1,0 +1,28 @@
+diff --git a/src/components/UserComment.tsx b/src/components/UserComment.tsx
+index 1234567..abcdefg 100644
+--- a/src/components/UserComment.tsx
++++ b/src/components/UserComment.tsx
+@@ -1,9 +1,25 @@
+ import React from 'react';
+
+-export function UserComment({ text }: { text: string }) {
++interface Props {
++  comment: string;
++  username: string;
++  bio: string;
++}
++
++export function UserComment({ comment, username, bio }: Props) {
+   return (
+     <div className="comment">
+-      <p>{text}</p>
++      <h3>{username}</h3>
++      <div dangerouslySetInnerHTML={{ __html: comment }} />
++      <p className="bio" dangerouslySetInnerHTML={{ __html: bio }} />
+     </div>
+   );
+ }
++
++export function renderMarkdown(raw: string) {
++  return { __html: raw };
++}

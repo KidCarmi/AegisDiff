@@ -1,0 +1,22 @@
+diff --git a/app/auth.py b/app/auth.py
+index 1234567..abcdefg 100644
+--- a/app/auth.py
++++ b/app/auth.py
+@@ -1,8 +1,18 @@
+ from django.http import HttpResponseRedirect
++from django.contrib.auth import logout
+
+ def login_view(request):
+     return HttpResponseRedirect('/dashboard')
+
++def logout_view(request):
++    next_url = request.GET.get('next', '/')
++    logout(request)
++    return HttpResponseRedirect(next_url)
++
++def oauth_callback(request):
++    redirect_to = request.GET.get('redirect_uri', '/home')
++    token = request.GET.get('code')
++    if token:
++        return HttpResponseRedirect(redirect_to)
++    return HttpResponseRedirect('/error')

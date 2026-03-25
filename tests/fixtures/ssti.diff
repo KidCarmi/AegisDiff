@@ -1,0 +1,21 @@
+diff --git a/app/templates_view.py b/app/templates_view.py
+index 1234567..abcdefg 100644
+--- a/app/templates_view.py
++++ b/app/templates_view.py
+@@ -1,8 +1,16 @@
+ from django.http import HttpResponse
++from jinja2 import Template
+
+ def index(request):
+     return HttpResponse("Welcome")
+
++def render_email(request):
++    template_str = request.POST.get('template', 'Hello {{ name }}')
++    name = request.POST.get('name', 'User')
++    t = Template(template_str)
++    return HttpResponse(t.render(name=name))
++
++def preview(request):
++    body = request.GET.get('body', '')
++    rendered = Template(body).render()
++    return HttpResponse(rendered)

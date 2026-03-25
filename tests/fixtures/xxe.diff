@@ -1,0 +1,22 @@
+diff --git a/app/parsers.py b/app/parsers.py
+index 1234567..abcdefg 100644
+--- a/app/parsers.py
++++ b/app/parsers.py
+@@ -1,7 +1,18 @@
+ from django.http import JsonResponse
++from lxml import etree
++import xml.etree.ElementTree as ET
+
+ def parse(request):
+     return JsonResponse({"ok": True})
+
++def parse_invoice(request):
++    xml_data = request.body
++    parser = etree.XMLParser(resolve_entities=True)
++    tree = etree.fromstring(xml_data, parser)
++    return JsonResponse({"tag": tree.tag})
++
++def import_settings(request):
++    raw = request.body.decode()
++    root = ET.fromstring(raw)
++    return JsonResponse({"root": root.tag})
