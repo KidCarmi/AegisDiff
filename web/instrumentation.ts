@@ -74,6 +74,20 @@ export async function register() {
         created_at  TIMESTAMPTZ DEFAULT NOW()
       )`;
 
+    // ── Phase 0: platform key rate-limit override per repo ────────────────
+    await sql`ALTER TABLE repos ADD COLUMN IF NOT EXISTS custom_daily_limit INTEGER`;
+
+    // ── Phase 5: scan feedback (developer verdict corrections) ────────────
+    await sql`
+      CREATE TABLE IF NOT EXISTS scan_feedback (
+        id              SERIAL PRIMARY KEY,
+        scan_id         UUID REFERENCES scans(id) ON DELETE CASCADE,
+        github_id       BIGINT NOT NULL,
+        correct_verdict TEXT NOT NULL,
+        reason          TEXT,
+        created_at      TIMESTAMPTZ DEFAULT NOW()
+      )`;
+
     // ── Indexes ───────────────────────────────────────────────────────────
     await sql`CREATE INDEX IF NOT EXISTS installations_account_idx ON installations(account_login)`;
     await sql`CREATE INDEX IF NOT EXISTS repos_token_hash_idx      ON repos(token_hash)`;

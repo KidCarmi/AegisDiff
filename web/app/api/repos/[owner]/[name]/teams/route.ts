@@ -1,18 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
-import { authOptions, verifyRepoAccess } from "../../../../../../lib/auth";
+import { authOptions } from "../../../../../../lib/auth";
 import { sql } from "../../../../../../lib/db";
-
-async function guard(req: NextRequest, owner: string, name: string) {
-  const session = await getServerSession(authOptions);
-  if (!session) return null;
-  const ok = await verifyRepoAccess((session.user as any).accessToken, owner, name);
-  return ok ? session : null;
-}
+import { requireRepoRole } from "../../../../../../lib/rbac";
 
 export async function GET(req: NextRequest, { params }: { params: { owner: string; name: string } }) {
-  if (!await guard(req, params.owner, params.name))
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const session = await getServerSession(authOptions);
+  try { await requireRepoRole(session, params.owner, params.name, "repo:viewer"); }
+  catch (r) { return r as Response; }
 
   const rows = await sql`SELECT teams_webhook_url FROM repos
     WHERE owner = ${params.owner} AND name = ${params.name} LIMIT 1`;
@@ -22,8 +17,9 @@ export async function GET(req: NextRequest, { params }: { params: { owner: strin
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: { owner: string; name: string } }) {
-  if (!await guard(req, params.owner, params.name))
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const session = await getServerSession(authOptions);
+  try { await requireRepoRole(session, params.owner, params.name, "repo:admin"); }
+  catch (r) { return r as Response; }
 
   const body = await req.json().catch(() => null);
   const url: string | null = body?.teamsWebhookUrl ?? null;

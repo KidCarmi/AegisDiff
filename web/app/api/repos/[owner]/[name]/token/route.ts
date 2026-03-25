@@ -13,7 +13,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { createHmac } from "crypto";
-import { authOptions, verifyRepoAccess } from "../../../../../../lib/auth";
+import { authOptions } from "../../../../../../lib/auth";
+import { requireRepoRole } from "../../../../../../lib/rbac";
 import { sql } from "../../../../../../lib/db";
 
 export async function GET(
@@ -21,21 +22,14 @@ export async function GET(
   { params }: { params: { owner: string; name: string } },
 ) {
   const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  try { await requireRepoRole(session, params.owner, params.name, "repo:viewer"); }
+  catch (r) { return r as Response; }
 
   const { owner, name } = params;
 
   // Validate path params
   if (!/^[\w.-]+$/.test(owner) || !/^[\w.-]+$/.test(name)) {
     return NextResponse.json({ error: "Invalid owner or name" }, { status: 400 });
-  }
-
-  const accessToken = (session.user as any).accessToken as string;
-
-  // Verify the caller has GitHub read access to this repo
-  const hasAccess = await verifyRepoAccess(accessToken, owner, name);
-  if (!hasAccess) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   // Only supported for GitHub App–connected repos

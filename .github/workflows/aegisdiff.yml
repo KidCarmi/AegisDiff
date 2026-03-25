@@ -89,22 +89,28 @@ jobs:
           fi
 
       # ── 5. Run AegisDiff triage ──────────────────────────────────────────
+      # AEGISDIFF_INGEST_URL is the only required secret.
+      # LLM keys are optional — if omitted, the engine fetches platform keys
+      # from AegisDiff automatically (free tier: 50 scans/day per repo).
+      # Add GEMINI_API_KEY and/or GROQ_API_KEY for unlimited scans.
       - name: Run AegisDiff triage
         if: steps.diff.outputs.skip == 'false'
         id: triage
         env:
-          GEMINI_API_KEY:  ${{ secrets.GEMINI_API_KEY }}
-          GROQ_API_KEY:    ${{ secrets.GROQ_API_KEY }}
-          GROQ_API_KEY_2:  ${{ secrets.GROQ_API_KEY_2 }}
-          GROQ_API_KEY_3:  ${{ secrets.GROQ_API_KEY_3 }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number || '' }}
-          COMMIT_SHA: ${{ github.sha }}
-          REPO: ${{ github.repository }}
-          DIFF_PATH: /tmp/aegisdiff_pr.diff
+          # Required
           AEGISDIFF_INGEST_URL: ${{ secrets.AEGISDIFF_INGEST_URL }}
+          GITHUB_TOKEN:         ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER:            ${{ github.event.pull_request.number || '' }}
+          COMMIT_SHA:           ${{ github.sha }}
+          REPO:                 ${{ github.repository }}
+          DIFF_PATH:            /tmp/aegisdiff_pr.diff
+          # Optional — bring your own keys for unlimited scans
+          GEMINI_API_KEY:       ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY:         ${{ secrets.GROQ_API_KEY }}
+          GROQ_API_KEY_2:       ${{ secrets.GROQ_API_KEY_2 }}
+          GROQ_API_KEY_3:       ${{ secrets.GROQ_API_KEY_3 }}
+          # Legacy — no longer needed (OIDC handles auth automatically)
           AEGISDIFF_REPO_TOKEN: ${{ secrets.AEGISDIFF_REPO_TOKEN }}
-          AEGISDIFF_GIST_ID: ${{ secrets.AEGISDIFF_GIST_ID }}
         run: |
           python -m aegisdiff.entrypoint
 

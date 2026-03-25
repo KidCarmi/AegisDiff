@@ -38,6 +38,43 @@ def _verdict_to_status(verdict) -> tuple[str, str]:
     return "error", "Security analysis failed — check workflow logs"
 
 
+def _fetch_platform_keys(ingest_url: str, oidc_token: str) -> dict:
+    """
+    Exchange an OIDC token for AegisDiff platform LLM keys.
+
+    Returns a dict with 'gemini_key' and/or 'groq_key' on success.
+    Returns {} on rate-limit (429) or any error — caller falls back to exit.
+    """
+    base = ingest_url.rstrip("/").removesuffix("/api/ingest")
+    try:
+        resp = httpx.get(
+            f"{base}/api/llm-token",
+            headers={"Authorization": f"Bearer {oidc_token}"},
+            timeout=10.0,
+        )
+        if resp.status_code == 429:
+            data = resp.json()
+            logger.error(
+                "Platform key rate limit: %s (%d/%d scans today). "
+                "Add GEMINI_API_KEY or GROQ_API_KEY to your repo secrets for unlimited scans.",
+                data.get("error", "limit reached"),
+                data.get("scans_today", "?"),
+                data.get("limit", 50),
+            )
+            return {}
+        if resp.status_code == 503:
+            logger.error(
+                "AegisDiff platform keys not configured. "
+                "Add GEMINI_API_KEY or GROQ_API_KEY to your repo secrets."
+            )
+            return {}
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as e:
+        logger.warning("Could not fetch platform keys (non-fatal): %s", e)
+        return {}
+
+
 def _get_oidc_token() -> str | None:
     """Fetch a GitHub Actions OIDC JWT for audience 'aegisdiff'."""
     import os
@@ -99,20 +136,33 @@ def main() -> None:
     cfg = load_config()
 
     groq_keys = [k for k in [cfg.groq_api_key, cfg.groq_api_key_2, cfg.groq_api_key_3] if k]
+    gemini_key = cfg.gemini_api_key
 
-    if not cfg.gemini_api_key and not groq_keys:
-        logger.error(
-            "No LLM API keys configured. "
-            "Set GEMINI_API_KEY and/or GROQ_API_KEY / GROQ_API_KEY_2 / GROQ_API_KEY_3 "
-            "in GitHub Secrets."
-        )
-        sys.exit(1)
+    # ── Platform key fallback — fetch if user hasn't provided their own ───
+    if not gemini_key and not groq_keys:
+        oidc = _get_oidc_token()
+        if oidc and cfg.aegisdiff_ingest_url:
+            logger.info("No user LLM keys found — fetching platform keys via OIDC")
+            platform = _fetch_platform_keys(cfg.aegisdiff_ingest_url, oidc)
+            gemini_key = platform.get("gemini_key", "") or ""
+            groq_key = platform.get("groq_key", "") or ""
+            if groq_key:
+                groq_keys = [groq_key]
+        if not gemini_key and not groq_keys:
+            logger.error(
+                "No LLM keys available. Either:\n"
+                "  1. Add GEMINI_API_KEY or GROQ_API_KEY to your repo secrets (unlimited), or\n"
+                "  2. Ensure AEGISDIFF_INGEST_URL is set (platform keys, 50 scans/day free)."
+            )
+            sys.exit(1)
+    else:
+        logger.info("Using user-provided LLM keys (unlimited scans)")
 
     # Build provider list — only include providers with keys configured.
     # Multiple Groq keys rotate automatically on rate-limit (429).
     providers = []
-    if cfg.gemini_api_key:
-        providers.append(GeminiProvider(cfg.gemini_api_key))
+    if gemini_key:
+        providers.append(GeminiProvider(gemini_key))
         logger.info("Provider: Gemini 1.5 Pro")
     for i, key in enumerate(groq_keys, start=1):
         providers.append(GroqProvider(key))

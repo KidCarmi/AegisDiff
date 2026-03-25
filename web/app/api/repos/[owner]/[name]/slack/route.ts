@@ -6,23 +6,18 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
-import { authOptions, verifyRepoAccess } from "../../../../../../lib/auth";
+import { authOptions } from '../../../../../../lib/auth';
+import { requireRepoRole } from '../../../../../../lib/rbac';
 import { sql } from "../../../../../../lib/db";
 
-async function guard(req: NextRequest, owner: string, name: string) {
-  const session = await getServerSession(authOptions);
-  if (!session) return null;
-  const accessToken = (session.user as any).accessToken as string;
-  const ok = await verifyRepoAccess(accessToken, owner, name);
-  return ok ? session : null;
-}
 
 export async function GET(
   req: NextRequest,
   { params }: { params: { owner: string; name: string } },
 ) {
-  const session = await guard(req, params.owner, params.name);
-  if (!session) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const session = await getServerSession(authOptions);
+  try { await requireRepoRole(session, params.owner, params.name, "repo:viewer"); }
+  catch (r) { return r as Response; }
 
   const rows = await sql`
     SELECT slack_webhook_url AS "slackWebhookUrl"
@@ -37,8 +32,9 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: { owner: string; name: string } },
 ) {
-  const session = await guard(req, params.owner, params.name);
-  if (!session) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const session = await getServerSession(authOptions);
+  try { await requireRepoRole(session, params.owner, params.name, "repo:admin"); }
+  catch (r) { return r as Response; }
 
   let body: { slackWebhookUrl: string | null };
   try {

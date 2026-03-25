@@ -7,23 +7,18 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
-import { authOptions, verifyRepoAccess } from "../../../../../../lib/auth";
+import { authOptions } from '../../../../../../lib/auth';
+import { requireRepoRole } from '../../../../../../lib/rbac';
 import { sql } from "../../../../../../lib/db";
 
 const SEVERITY_RANK: Record<string, number> = {
   INFO: 0, LOW: 1, MEDIUM: 2, HIGH: 3, CRITICAL: 4,
 };
 
-async function guard(req: NextRequest, owner: string, name: string) {
-  const session = await getServerSession(authOptions);
-  if (!session) return null;
-  const ok = await verifyRepoAccess((session.user as any).accessToken, owner, name);
-  return ok ? session : null;
-}
-
 export async function GET(req: NextRequest, { params }: { params: { owner: string; name: string } }) {
-  if (!await guard(req, params.owner, params.name))
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const session = await getServerSession(authOptions);
+  try { await requireRepoRole(session, params.owner, params.name, "repo:viewer"); }
+  catch (r) { return r as Response; }
 
   const rows = await sql`
     SELECT notify_min_severity AS "minSeverity",
@@ -34,8 +29,9 @@ export async function GET(req: NextRequest, { params }: { params: { owner: strin
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: { owner: string; name: string } }) {
-  if (!await guard(req, params.owner, params.name))
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const session = await getServerSession(authOptions);
+  try { await requireRepoRole(session, params.owner, params.name, "repo:admin"); }
+  catch (r) { return r as Response; }
 
   const body = await req.json().catch(() => ({}));
   const minSeverity = typeof body.minSeverity === "string" && body.minSeverity in SEVERITY_RANK
