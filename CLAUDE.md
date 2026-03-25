@@ -60,6 +60,12 @@ scripts/         local_scan.py for manual testing
    to `AEGISDIFF_REPO_TOKEN` only for legacy repos. New installs need only
    `AEGISDIFF_INGEST_URL`. Do not add new token-based auth paths.
 
+8. **Platform key distribution is the zero-config path.** After Phase 0 ships,
+   the engine must NOT hard-exit when no user LLM keys are configured — it must
+   first try `/api/llm-token` (OIDC-authenticated). Only exit if both user keys
+   AND platform keys are unavailable. User-provided keys always take priority
+   and bypass the 50/day rate limit.
+
 8. **Groq context budget is 5,500 tokens.** The orchestrator halves `context_scale`
    on 413 responses (1.0 → 0.5 → 0.25 → 0.125) and retries the same provider before
    rotating. Do not raise this limit without testing against large real-world diffs.
@@ -171,6 +177,89 @@ It is the most important piece of the system. Changes must:
 
 Work through phases in order. Do not start a phase until the previous is complete
 and all tests pass.
+
+### Phase 0 — Platform Key Distribution (TRUE zero-config)
+
+**Goal:** Users add only `AEGISDIFF_INGEST_URL`. No `GEMINI_API_KEY`, no `GROQ_API_KEY`.
+AegisDiff distributes its own platform LLM keys to authenticated runners via OIDC.
+User-provided keys always win (no rate limit). Platform keys are rate-limited (50/day/repo).
+
+**Privacy preserved:** Keys travel to the GitHub Actions runner. LLM calls are made
+FROM the runner. The diff never leaves GitHub — only OIDC tokens reach AegisDiff.
+
+**New Vercel env vars (set by the AegisDiff operator):**
+- `PLATFORM_GEMINI_API_KEY` — AegisDiff's own Gemini key
+- `PLATFORM_GROQ_API_KEY` — AegisDiff's own Groq key
+
+**New endpoint — `web/app/api/llm-token/route.ts`:**
+```
+GET /api/llm-token
+Authorization: Bearer <github-oidc-jwt>
+
+Response 200:
+{ "gemini_key": "...", "groq_key": "...", "expires_at": "<ISO>" }
+
+Response 429:
+{ "error": "Rate limit: 50 scans/day per repo on free tier" }
+```
+- Verify OIDC JWT (same `verifyOIDC()` used by `/api/ingest`)
+- Count `scans` rows for this repo in the last 24 hours
+- If count >= 50, return 429 with a clear message
+- Otherwise return `PLATFORM_GEMINI_API_KEY` + `PLATFORM_GROQ_API_KEY` from env
+- Write the key fetch to `audit_log` (action: "llm_key_issued")
+
+**Changes to `aegisdiff/entrypoint.py`:**
+```python
+def _fetch_platform_keys(ingest_url: str, oidc_token: str) -> dict:
+    """Fetch platform LLM keys from AegisDiff when user has none configured."""
+    base = ingest_url.removesuffix("/api/ingest").rstrip("/")
+    resp = httpx.get(
+        f"{base}/api/llm-token",
+        headers={"Authorization": f"Bearer {oidc_token}"},
+        timeout=10.0,
+    )
+    if resp.status_code == 429:
+        logger.warning("Platform key rate limit reached: %s", resp.json().get("error"))
+        return {}
+    resp.raise_for_status()
+    return resp.json()
+```
+
+In `main()`, replace the hard exit when no keys are found:
+```python
+# Try platform keys before giving up
+if not cfg.gemini_api_key and not groq_keys and cfg.aegisdiff_ingest_url:
+    oidc = _get_oidc_token()
+    if oidc:
+        platform = _fetch_platform_keys(cfg.aegisdiff_ingest_url, oidc)
+        gemini_key = platform.get("gemini_key", "")
+        groq_key = platform.get("groq_key", "")
+        if not gemini_key and not groq_key:
+            logger.error("No keys available (platform rate limit or no AEGISDIFF_INGEST_URL)")
+            sys.exit(1)
+        # rebuild providers with platform keys
+        ...
+```
+
+**Changes to `aegisdiff/config.py`:** No change needed — the platform key fetch
+happens in `entrypoint.py` after config load, before provider construction.
+
+**Changes to `.github/workflows/aegisdiff.yml`:**
+- Remove `GEMINI_API_KEY` and `GROQ_API_KEY` from the required secrets docs
+- Keep them as optional pass-through (if set, they take priority)
+- Update the `Run AegisDiff triage` step comment
+
+**Rate limit table (stored in DB `scans`, not a separate table):**
+```sql
+SELECT COUNT(*) FROM scans
+WHERE repo_owner = $1 AND repo_name = $2
+  AND created_at > NOW() - INTERVAL '24 hours'
+```
+
+**Tests:**
+- `tests/test_entrypoint.py` — mock `_fetch_platform_keys`, verify it's called when
+  no user keys are set; verify user keys skip the fetch entirely
+- Test 429 handling: engine exits 1 with a clear message, not a traceback
 
 ### Phase 1 — Inline PR Review Comments
 **Goal:** Post findings as inline review comments pinned to the exact vulnerable line,

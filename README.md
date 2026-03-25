@@ -38,18 +38,19 @@ GitHub Actions Runner (your environment — code never leaves GitHub)
 
 ## Quick Start (60 seconds)
 
-### Step 1 — Add secrets to your repo
+### Step 1 — Add one secret to your repo
 
 **Settings → Secrets → Actions:**
 
-| Secret | Where to get it |
+| Secret | Value |
 |---|---|
-| `GEMINI_API_KEY` | [aistudio.google.com](https://aistudio.google.com) — free |
-| `GROQ_API_KEY` | [console.groq.com](https://console.groq.com) — free |
 | `AEGISDIFF_INGEST_URL` | Your Vercel deployment URL + `/api/ingest` |
 
-> `AEGISDIFF_REPO_TOKEN` is no longer required. Auth is handled automatically
-> via GitHub Actions OIDC (zero-config).
+That's it. No Gemini key. No Groq key. AegisDiff provides the AI backbone.
+
+> **Bring your own keys for unlimited scans.**
+> Add `GEMINI_API_KEY` and/or `GROQ_API_KEY` to use your own free-tier quota
+> instead of the platform quota. Your keys always take priority.
 
 ### Step 2 — Add the workflow
 
@@ -205,11 +206,37 @@ npm run build                       # Production build check
 
 ---
 
+## How Platform Keys Work
+
+When you don't provide your own `GEMINI_API_KEY`/`GROQ_API_KEY`, the engine
+fetches short-lived platform keys from AegisDiff before each scan:
+
+```
+GitHub Actions runner
+    │
+    ├── 1. Get OIDC token (audience: aegisdiff) — auto, no config
+    ├── 2. POST /api/llm-token  ← exchanges OIDC for platform LLM keys
+    │         └── rate limited: 50 scans/day per repo (free tier)
+    ├── 3. Call Gemini/Groq directly FROM the runner using those keys
+    └── 4. Your diff never leaves GitHub — only tokens travel to AegisDiff
+```
+
+**Bring your own keys = unlimited.** Set `GEMINI_API_KEY` in your repo secrets
+and the platform key step is skipped entirely.
+
+---
+
 ## Roadmap
 
-### Phase 1 — Inline PR Comments (next)
+### Phase 0 — Platform Key Distribution ← next
+`/api/llm-token` endpoint: OIDC-authenticated runners exchange their GitHub
+token for AegisDiff's own Gemini/Groq keys. **Users need zero API keys.**
+Rate-limited at 50 scans/day per repo on the free tier. User-provided keys
+always take priority and bypass the limit entirely.
+
+### Phase 1 — Inline PR Review Comments
 Post findings as inline review comments pinned to the exact vulnerable line,
-not just a top-level PR comment.
+not just a top-level PR comment. What developers actually expect from a SAST tool.
 
 ### Phase 2 — Per-Hunk Analysis
 Split large PRs by file/hunk, analyze each independently, aggregate results.
