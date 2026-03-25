@@ -84,7 +84,7 @@ class LLMOrchestrator:
                     ):
                         context_scale *= 0.5
                         logger.warning(
-                            "413 Payload Too Large from %s — shrinking context to %.0f%% and retrying",
+                            "413 Payload Too Large from %s — shrinking context to %.0f%%",
                             provider.name,
                             context_scale * 100,
                         )
