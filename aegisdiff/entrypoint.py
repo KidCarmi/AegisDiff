@@ -174,7 +174,11 @@ def main() -> None:
 
     cfg = load_config()
 
-    groq_keys = [k for k in [cfg.groq_api_key, cfg.groq_api_key_2, cfg.groq_api_key_3] if k]
+    groq_keys = [
+        k
+        for k in [cfg.groq_api_key, cfg.groq_api_key_2, cfg.groq_api_key_3, cfg.groq_api_key_4]
+        if k
+    ]
     gemini_key = cfg.gemini_api_key
 
     # ── Platform key fallback — fetch if user hasn't provided their own ───

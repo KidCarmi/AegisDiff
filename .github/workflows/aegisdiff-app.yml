@@ -36,9 +36,12 @@ jobs:
           GITHUB_APP_ID:           ${{ secrets.GITHUB_APP_ID }}
           GITHUB_APP_PRIVATE_KEY:  ${{ secrets.GITHUB_APP_PRIVATE_KEY }}
 
-          # LLM providers (our secrets)
+          # LLM providers (our secrets — keys rotate automatically on 429)
           GEMINI_API_KEY:          ${{ secrets.GEMINI_API_KEY }}
           GROQ_API_KEY:            ${{ secrets.GROQ_API_KEY }}
+          GROQ_API_KEY_2:          ${{ secrets.GROQ_API_KEY_2 }}
+          GROQ_API_KEY_3:          ${{ secrets.GROQ_API_KEY_3 }}
+          GROQ_API_KEY_4:          ${{ secrets.GROQ_API_KEY_4 }}
 
           # Target PR context (passed from webhook via client_payload)
           INSTALLATION_ID: ${{ github.event.client_payload.installation_id }}

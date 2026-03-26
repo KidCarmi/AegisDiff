@@ -16,7 +16,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { sql } from "../../../lib/db";
 import { verifyOIDC } from "../../../lib/oidc";
 
-const FREE_TIER_DAILY_LIMIT = 50;
+const FREE_TIER_DAILY_LIMIT = 100;
 
 export async function GET(req: NextRequest) {
   // ── 1. Authenticate via OIDC ───────────────────────────────────────────

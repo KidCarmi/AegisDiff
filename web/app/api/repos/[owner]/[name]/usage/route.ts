@@ -10,7 +10,7 @@ import { authOptions } from "../../../../../../lib/auth";
 import { requireRepoRole } from "../../../../../../lib/rbac";
 import { sql } from "../../../../../../lib/db";
 
-const DAILY_LIMIT = 50;
+const DAILY_LIMIT = 100;
 
 export async function GET(
   req: NextRequest,
