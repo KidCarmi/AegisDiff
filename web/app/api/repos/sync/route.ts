@@ -32,6 +32,7 @@ async function ghFetch(url: string, accessToken: string) {
 }
 
 export async function POST(req: NextRequest) {
+  try {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -102,4 +103,11 @@ export async function POST(req: NextRequest) {
     installations: installations.length,
     message: `Synced ${repoCount} repo${repoCount !== 1 ? "s" : ""} from ${installations.length} installation${installations.length !== 1 ? "s" : ""}.`,
   });
+  } catch (err: any) {
+    console.error("[sync] Error:", err);
+    return NextResponse.json(
+      { error: err?.message ?? "Sync failed — check server logs" },
+      { status: 500 }
+    );
+  }
 }

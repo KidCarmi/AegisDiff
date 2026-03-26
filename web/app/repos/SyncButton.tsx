@@ -10,14 +10,15 @@ export function SyncButton() {
     setState("loading");
     try {
       const res = await fetch("/api/repos/sync", { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Sync failed");
-      setMessage(data.message);
+      const text = await res.text();
+      let data: any = {};
+      try { data = JSON.parse(text); } catch { /* non-JSON body */ }
+      if (!res.ok) throw new Error(data.error ?? `Server error ${res.status}`);
+      setMessage(data.message ?? "Done");
       setState("done");
-      // Reload the page after a short delay so the new repos appear
       setTimeout(() => window.location.reload(), 1200);
     } catch (e: any) {
-      setMessage(e.message);
+      setMessage(e.message ?? "Unknown error");
       setState("error");
     }
   }
