@@ -11,7 +11,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "../../../../../../lib/auth";
 import { requireRepoRole } from "../../../../../../lib/rbac";
 import { sql } from "../../../../../../lib/db";
-import { getInstallationToken, ghFetch } from "../../../../../../lib/github-app";
+import { getInstallationToken, getRepoInstallationId, ghFetch } from "../../../../../../lib/github-app";
 
 const WORKFLOW_PATH = ".github/workflows/aegisdiff.yml";
 
@@ -117,8 +117,21 @@ export async function POST(
         { status: 400 }
       );
     }
-    const installationId = (rows[0] as any).installation_id as number;
-    const token = await getInstallationToken(installationId);
+    let installationId = (rows[0] as any).installation_id as number;
+
+    // If the stored installation_id is stale, look up the current one via the App JWT.
+    // This handles re-installs, org transfers, or "Selected repositories" mode where
+    // the original installation may no longer cover this repo.
+    const freshId = await getRepoInstallationId(owner, name);
+    if (freshId && freshId !== installationId) {
+      installationId = freshId;
+      // Persist the corrected installation_id so future requests don't need the lookup
+      await sql`UPDATE repos SET installation_id = ${freshId} WHERE owner = ${owner} AND name = ${name}`;
+    }
+
+    // Scope the token to this specific repo — required when the App was installed
+    // with "Selected repositories" mode (avoids "Resource not accessible by integration")
+    const token = await getInstallationToken(installationId, { owner, name });
 
     const ingestUrl = `${process.env.NEXTAUTH_URL ?? "https://aegis-diff.vercel.app"}/api/ingest`;
     const content = buildWorkflowContent(ingestUrl);
