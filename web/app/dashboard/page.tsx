@@ -117,29 +117,29 @@ export default async function DashboardPage() {
       label: "Total Scans",
       value: stats?.total ?? "0",
       sub: "last 30 days",
-      color: "text-gray-900",
-      bg: "bg-white",
+      color: "text-gray-900 dark:text-gray-50",
+      bg: "bg-white dark:bg-gray-900",
     },
     {
       label: "Issues Found",
       value: stats?.true_positives ?? "0",
       sub: "true positives",
       color: "text-red-600",
-      bg: "bg-red-50",
+      bg: "bg-red-50 dark:bg-red-950",
     },
     {
       label: "False Positives",
       value: stats?.false_positives ?? "0",
       sub: "noise filtered",
       color: "text-green-600",
-      bg: "bg-green-50",
+      bg: "bg-green-50 dark:bg-green-950",
     },
     {
       label: "Needs Review",
       value: stats?.needs_review ?? "0",
       sub: "human check needed",
       color: "text-yellow-600",
-      bg: "bg-yellow-50",
+      bg: "bg-yellow-50 dark:bg-yellow-950",
     },
   ];
 
@@ -150,8 +150,8 @@ export default async function DashboardPage() {
       {/* Header */}
       <div className="mb-6 flex items-start justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Security Dashboard</h1>
-          <p className="mt-1 text-sm text-gray-500">
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-50">Security Dashboard</h1>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             {username || session.user?.name} · Last 30 days
           </p>
         </div>
@@ -159,7 +159,7 @@ export default async function DashboardPage() {
           <div className="flex items-center gap-3">
             <a
               href="/api/scans/export"
-              className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 transition-colors"
+              className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
               download
             >
               ↓ Export CSV
@@ -179,11 +179,11 @@ export default async function DashboardPage() {
         {statCards.map((s) => (
           <div
             key={s.label}
-            className={`rounded-xl border border-gray-200 ${s.bg} p-4 shadow-sm`}
+            className={`rounded-xl border border-gray-200 dark:border-gray-700 ${s.bg} p-4 shadow-sm`}
           >
             <div className={`text-3xl font-bold ${s.color}`}>{s.value}</div>
-            <div className="mt-1 text-xs font-semibold text-gray-700">{s.label}</div>
-            <div className="text-[11px] text-gray-400 mt-0.5">{s.sub}</div>
+            <div className="mt-1 text-xs font-semibold text-gray-700 dark:text-gray-200">{s.label}</div>
+            <div className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">{s.sub}</div>
           </div>
         ))}
       </div>
@@ -197,7 +197,7 @@ export default async function DashboardPage() {
 
       {/* Waiting for first scan — has repos but no scans yet */}
       {connected && !hasScans && (
-        <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 p-6">
+        <div className="mb-6 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950 p-6">
           <div className="flex items-start gap-4">
             <div className="text-3xl">⏳</div>
             <div className="flex-1">
