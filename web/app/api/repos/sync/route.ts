@@ -15,7 +15,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { createHmac, createHash } from "crypto";
-import { SignJWT, importPKCS8 } from "jose";
+import { SignJWT } from "jose";
+import { createPrivateKey } from "crypto";
 import { authOptions } from "../../../../lib/auth";
 import { sql } from "../../../../lib/db";
 
@@ -34,9 +35,11 @@ async function generateAppJWT(): Promise<string> {
       "GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY must be set in Vercel environment variables."
     );
   }
-  // Vercel stores multiline secrets with literal \n — restore real newlines
+  // Vercel stores multiline secrets with literal \n — restore real newlines.
+  // createPrivateKey handles both PKCS#1 (BEGIN RSA PRIVATE KEY) and
+  // PKCS#8 (BEGIN PRIVATE KEY) formats; jose accepts the KeyObject directly.
   const pem = rawKey.replace(/\\n/g, "\n");
-  const privateKey = await importPKCS8(pem, "RS256");
+  const privateKey = createPrivateKey(pem);
   const now = Math.floor(Date.now() / 1000);
   return new SignJWT({ iss: appId })
     .setProtectedHeader({ alg: "RS256" })
