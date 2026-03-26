@@ -95,6 +95,7 @@ export async function register() {
     await sql`CREATE INDEX IF NOT EXISTS api_keys_github_idx        ON api_keys(github_id)`;
     await sql`CREATE INDEX IF NOT EXISTS audit_log_github_idx       ON audit_log(github_id, created_at DESC)`;
     await sql`CREATE INDEX IF NOT EXISTS ignore_rules_repo_idx      ON ignore_rules(repo_id)`;
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS scan_feedback_scan_user_idx ON scan_feedback(scan_id, github_id)`;
 
   } catch (err) {
     console.warn("[migrate] Schema migration error (non-fatal):", err);

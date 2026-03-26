@@ -237,7 +237,7 @@ export default async function DashboardPage() {
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100">Recent Scans</h2>
         </div>
-        <ScanList scans={scans} />
+        <ScanList scans={scans} canFeedback={true} />
       </div>
     </div>
   );

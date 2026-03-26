@@ -11,7 +11,7 @@ const VERDICT_FILTERS: { label: string; value: VerdictType | "ALL" }[] = [
   { label: "✅ Clean", value: "FALSE_POSITIVE" },
 ];
 
-export function ScanList({ scans }: { scans: Scan[] }) {
+export function ScanList({ scans, canFeedback = false }: { scans: Scan[]; canFeedback?: boolean }) {
   const [filter, setFilter] = useState<VerdictType | "ALL">("ALL");
   const [search, setSearch] = useState("");
 
@@ -83,7 +83,7 @@ export function ScanList({ scans }: { scans: Scan[] }) {
         <div className="space-y-2">
           {visible.map((scan) => (
             <a key={scan.id} href={`/scans/${scan.id}`}>
-              <ScanCard scan={scan} />
+              <ScanCard scan={scan} canFeedback={canFeedback} />
             </a>
           ))}
           {visible.length < scans.length && (

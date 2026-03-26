@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import { VerdictBadge } from "./VerdictBadge";
 import { SEVERITY_COLORS, type Scan, type VerdictType } from "../lib/types";
 
@@ -18,11 +21,60 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-export function ScanCard({ scan }: { scan: Scan }) {
+type FeedbackState = "idle" | "loading" | "done" | "error";
+
+/**
+ * ScanCard — displays scan metadata and optionally a feedback row.
+ *
+ * `canFeedback`: pass true when the current user is repo:developer or higher.
+ * The feedback buttons are hidden when false so viewers never see them.
+ */
+export function ScanCard({
+  scan,
+  canFeedback = false,
+}: {
+  scan: Scan;
+  canFeedback?: boolean;
+}) {
   const repoSlug = `${scan.repoOwner}/${scan.repoName}`;
   const severityClass = SEVERITY_COLORS[scan.severity ?? "N/A"] ?? "text-gray-400";
   const sha = scan.commitSha.slice(0, 7);
   const borderColor = VERDICT_BORDER[scan.verdict] ?? "border-l-gray-300";
+
+  const [feedbackState, setFeedbackState] = useState<FeedbackState>("idle");
+  const [submittedVerdict, setSubmittedVerdict] = useState<VerdictType | null>(null);
+
+  const submitFeedback = async (e: React.MouseEvent, correct_verdict: VerdictType) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (feedbackState === "loading" || feedbackState === "done") return;
+    setFeedbackState("loading");
+    try {
+      const resp = await fetch(`/api/scans/${scan.id}/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ correct_verdict }),
+      });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        console.error("[feedback] API error:", data);
+        setFeedbackState("error");
+        return;
+      }
+      setSubmittedVerdict(correct_verdict);
+      setFeedbackState("done");
+    } catch {
+      setFeedbackState("error");
+    }
+  };
+
+  // Which thumbs button makes sense depends on the current verdict
+  const showThumbsDown =
+    canFeedback &&
+    (scan.verdict === "FALSE_POSITIVE" || scan.verdict === "NEEDS_REVIEW");
+  const showThumbsUp =
+    canFeedback &&
+    (scan.verdict === "TRUE_POSITIVE" || scan.verdict === "NEEDS_REVIEW");
 
   return (
     <div
@@ -83,9 +135,47 @@ export function ScanCard({ scan }: { scan: Scan }) {
           </div>
         </div>
 
-        {/* Verdict badge */}
-        <div className="shrink-0 self-center">
+        {/* Right column: verdict badge + feedback buttons */}
+        <div className="shrink-0 self-center flex flex-col items-end gap-2">
           <VerdictBadge verdict={scan.verdict} />
+
+          {/* Feedback buttons — developer+ only */}
+          {canFeedback && feedbackState !== "done" && (
+            <div className="flex items-center gap-1">
+              {feedbackState === "error" && (
+                <span className="text-[11px] text-red-500 mr-1">Failed</span>
+              )}
+              {showThumbsDown && (
+                <button
+                  title="Mark as missed finding (true positive)"
+                  disabled={feedbackState === "loading"}
+                  onClick={(e) => submitFeedback(e, "TRUE_POSITIVE")}
+                  className="rounded p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-40 transition-colors"
+                >
+                  👎
+                </button>
+              )}
+              {showThumbsUp && (
+                <button
+                  title="Mark as false positive"
+                  disabled={feedbackState === "loading"}
+                  onClick={(e) => submitFeedback(e, "FALSE_POSITIVE")}
+                  className="rounded p-1 text-gray-400 hover:text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 disabled:opacity-40 transition-colors"
+                >
+                  👍
+                </button>
+              )}
+              {feedbackState === "loading" && (
+                <span className="text-[11px] text-gray-400 ml-1">…</span>
+              )}
+            </div>
+          )}
+
+          {feedbackState === "done" && submittedVerdict && (
+            <span className="text-[11px] text-gray-500 dark:text-gray-400">
+              {submittedVerdict === "FALSE_POSITIVE" ? "Marked FP ✓" : "Marked TP ✓"}
+            </span>
+          )}
         </div>
       </div>
     </div>
