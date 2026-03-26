@@ -144,7 +144,7 @@ export async function POST(
     const contentB64 = Buffer.from(content).toString("base64");
 
     // Helper: try to commit the workflow file with a given token
-    async function commitWorkflow(t: string) {
+    const commitWorkflow = async (t: string) => {
       let existingSha: string | undefined;
       try {
         const existing = await ghFetch(
