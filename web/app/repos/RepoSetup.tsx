@@ -9,7 +9,7 @@ interface Props {
   appInstalled: boolean;
 }
 
-type State = "idle" | "loading" | "done" | "error";
+type State = "idle" | "loading" | "done" | "error" | "permission_error";
 
 export function RepoSetup({ owner, name, ingestUrl, appInstalled }: Props) {
   const [state, setState] = useState<State>("idle");
@@ -24,7 +24,14 @@ export function RepoSetup({ owner, name, ingestUrl, appInstalled }: Props) {
       const text = await res.text();
       let data: any = {};
       try { data = JSON.parse(text); } catch { /* non-JSON */ }
-      if (!res.ok) throw new Error(data.error ?? `Server error ${res.status}`);
+      if (!res.ok) {
+        if (data.needs_permission_fix) {
+          setState("permission_error");
+          setShowManual(true);
+          return;
+        }
+        throw new Error(data.error ?? `Server error ${res.status}`);
+      }
       setState("done");
       setMessage(data.updated ? "Workflow updated!" : "Workflow added!");
     } catch (e: any) {
@@ -84,6 +91,20 @@ export function RepoSetup({ owner, name, ingestUrl, appInstalled }: Props) {
           </button>
           {state === "error" && (
             <span className="text-xs text-red-500">{message}</span>
+          )}
+          {state === "permission_error" && (
+            <span className="text-xs text-amber-600 dark:text-amber-400">
+              App needs <strong>Contents: read &amp; write</strong> permission.{" "}
+              <a
+                href={`https://github.com/settings/apps`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline"
+              >
+                Fix in GitHub App settings ↗
+              </a>
+              {" "}then re-accept the install. Use manual setup below in the meantime.
+            </span>
           )}
           <button
             onClick={() => setShowManual((v) => !v)}

@@ -152,9 +152,19 @@ export async function POST(
     return NextResponse.json({ ok: true, updated: !!existingSha });
   } catch (err: any) {
     console.error("[setup-workflow] Error:", err);
-    return NextResponse.json(
-      { error: err?.message ?? "Setup failed" },
-      { status: 500 }
-    );
+    const msg: string = err?.message ?? "Setup failed";
+    // "Resource not accessible by integration" means the GitHub App is missing
+    // contents:write permission. Return a structured error so the UI can show
+    // a targeted fix link instead of a raw API dump.
+    if (msg.includes("Resource not accessible by integration") || msg.includes("403")) {
+      return NextResponse.json(
+        {
+          error: "GitHub App needs Contents (read & write) permission. Update the App permissions and re-accept the install.",
+          needs_permission_fix: true,
+        },
+        { status: 403 }
+      );
+    }
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
