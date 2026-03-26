@@ -14,7 +14,7 @@ type State = "idle" | "loading" | "done" | "error";
 export function RepoSetup({ owner, name, ingestUrl, appInstalled }: Props) {
   const [state, setState] = useState<State>("idle");
   const [message, setMessage] = useState("");
-  const [showManual, setShowManual] = useState(false);
+  const [showManual, setShowManual] = useState(!appInstalled);
   const [copied, setCopied] = useState(false);
 
   async function setupWorkflow() {

@@ -59,11 +59,18 @@ async function getRepos(githubId: number, username: string): Promise<RepoRow[]> 
       AND (i.account_login = ${username} OR r.owner = ${username})
     GROUP BY r.id ORDER BY r.created_at DESC`;
 
-  const seen = new Set<string>();
+  const seen = new Map<string, number>(); // key → index in merged
   const merged: RepoRow[] = [];
   for (const r of [...(owned as any[]), ...(appRepos as any[])]) {
     const key = `${r.owner}/${r.name}`;
-    if (!seen.has(key)) { seen.add(key); merged.push(r as RepoRow); }
+    const existing = seen.get(key);
+    if (existing === undefined) {
+      seen.set(key, merged.length);
+      merged.push(r as RepoRow);
+    } else if (r.appInstalled && !merged[existing].appInstalled) {
+      // Prefer the app-installed version so the one-click button shows
+      merged[existing] = { ...merged[existing], appInstalled: true };
+    }
   }
   return merged;
 }
