@@ -2,66 +2,20 @@
  * POST /api/repos/sync
  *
  * Syncs GitHub App installations and repos directly from the GitHub API.
- * Uses the GitHub App JWT (GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY) to call
- * /app/installations, then fetches repos per installation.
- *
- * This is the fallback path when webhooks fail (wrong URL, missing secret, etc).
- * Safe to call multiple times — all DB writes are idempotent.
- *
- * Required Vercel env vars:
- *   GITHUB_APP_ID          — numeric GitHub App ID
- *   GITHUB_APP_PRIVATE_KEY — PEM private key (replace newlines with \n in Vercel)
+ * Uses the GitHub App JWT to call /app/installations, then registers each
+ * repo in the DB. Safe to call multiple times — all writes are idempotent.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { createHmac, createHash } from "crypto";
-import { SignJWT } from "jose";
-import { createPrivateKey } from "crypto";
 import { authOptions } from "../../../../lib/auth";
 import { sql } from "../../../../lib/db";
+import { generateAppJWT, getInstallationToken, ghFetch } from "../../../../lib/github-app";
 
 function deriveRepoToken(repoSlug: string): string {
   const secret = process.env.GITHUB_APP_WEBHOOK_SECRET ?? "dev-secret";
   const rawToken = createHmac("sha256", secret).update(repoSlug).digest("hex");
   return createHash("sha256").update(rawToken).digest("hex");
-}
-
-/** Generate a GitHub App JWT valid for 8 minutes. */
-async function generateAppJWT(): Promise<string> {
-  const appId = process.env.GITHUB_APP_ID;
-  const rawKey = process.env.GITHUB_APP_PRIVATE_KEY;
-  if (!appId || !rawKey) {
-    throw new Error(
-      "GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY must be set in Vercel environment variables."
-    );
-  }
-  // Vercel stores multiline secrets with literal \n — restore real newlines.
-  // createPrivateKey handles both PKCS#1 (BEGIN RSA PRIVATE KEY) and
-  // PKCS#8 (BEGIN PRIVATE KEY) formats; jose accepts the KeyObject directly.
-  const pem = rawKey.replace(/\\n/g, "\n");
-  const privateKey = createPrivateKey(pem);
-  const now = Math.floor(Date.now() / 1000);
-  return new SignJWT({ iss: appId })
-    .setProtectedHeader({ alg: "RS256" })
-    .setIssuedAt(now - 60)
-    .setExpirationTime(now + 480)
-    .sign(privateKey);
-}
-
-async function ghFetch(url: string, token: string, method = "GET") {
-  const resp = await fetch(url, {
-    method,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github+json",
-    },
-    cache: "no-store",
-  });
-  if (!resp.ok) {
-    const body = await resp.text().catch(() => "");
-    throw new Error(`GitHub API ${resp.status} ${url}: ${body.slice(0, 200)}`);
-  }
-  return resp.json();
 }
 
 export async function POST(req: NextRequest) {
@@ -70,11 +24,9 @@ export async function POST(req: NextRequest) {
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const username = (session.user as any).username as string;
-
-    // Generate short-lived GitHub App JWT
     const appJWT = await generateAppJWT();
 
-    // Fetch all installations for this App (paginated)
+    // Fetch all installations for this App
     let installations: any[] = [];
     let page = 1;
     while (true) {
@@ -87,9 +39,7 @@ export async function POST(req: NextRequest) {
       page++;
     }
 
-    // Filter to installations accessible to this user
-    // (personal account installs where account_login = username,
-    //  or org installs — we register all and let RBAC filter on display)
+    // Only include installations for this user's personal account or their orgs
     const relevant = installations.filter(
       (i) => i.account?.login === username || i.account?.type === "Organization"
     );
@@ -104,7 +54,6 @@ export async function POST(req: NextRequest) {
     let repoCount = 0;
 
     for (const inst of relevant) {
-      // Upsert installation record
       await sql`
         INSERT INTO installations (installation_id, account_login, account_type)
         VALUES (${inst.id}, ${inst.account.login}, ${inst.account.type})
@@ -113,15 +62,8 @@ export async function POST(req: NextRequest) {
               account_login = EXCLUDED.account_login
       `;
 
-      // Get an installation access token to list repos
-      const tokenData = await ghFetch(
-        `https://api.github.com/app/installations/${inst.id}/access_tokens`,
-        appJWT,
-        "POST"
-      ) as { token: string };
-      const installToken = tokenData.token;
+      const installToken = await getInstallationToken(inst.id);
 
-      // Fetch repos for this installation
       let repos: any[] = [];
       let rPage = 1;
       while (true) {
@@ -137,7 +79,6 @@ export async function POST(req: NextRequest) {
       for (const r of repos) {
         const [owner, name] = (r.full_name as string).split("/");
         const tokenHash = deriveRepoToken(r.full_name);
-
         await sql`
           INSERT INTO repos (user_id, owner, name, token_hash, installation_id, github_repo_id)
           VALUES (NULL, ${owner}, ${name}, ${tokenHash}, ${inst.id}, ${r.id})
@@ -159,7 +100,7 @@ export async function POST(req: NextRequest) {
   } catch (err: any) {
     console.error("[sync] Error:", err);
     return NextResponse.json(
-      { error: err?.message ?? "Sync failed — check server logs" },
+      { error: err?.message ?? "Sync failed" },
       { status: 500 }
     );
   }
