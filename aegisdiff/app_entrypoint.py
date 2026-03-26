@@ -43,16 +43,8 @@ def _get_env(key: str, required: bool = True) -> str:
     return val
 
 
-def _send_to_ingest(
-    ingest_url: str,
-    ingest_token: str,
-    verdict,
-    pr_number: int,
-    commit_sha: str,
-    repo: str,
-    scan_ms: int,
-) -> None:
-    payload = {
+def _build_item(verdict, pr_number: int, commit_sha: str, repo: str, scan_ms: int) -> dict:
+    return {
         "verdict": verdict.verdict.value,
         "severity": verdict.severity.value,
         "cwe_id": verdict.cwe_id,
@@ -64,11 +56,32 @@ def _send_to_ingest(
         "pr_url": f"https://github.com/{repo}/pull/{pr_number}",
         "scan_ms": scan_ms,
     }
+
+
+def _send_to_ingest(
+    ingest_url: str,
+    ingest_token: str,
+    verdicts,
+    pr_number: int,
+    commit_sha: str,
+    repo: str,
+    scan_ms: int,
+) -> None:
+    from .triage.verdicts import Verdict as _Verdict
+
+    if isinstance(verdicts, _Verdict):
+        payload = _build_item(verdicts, pr_number, commit_sha, repo, scan_ms)
+    else:
+        payload = [_build_item(v, pr_number, commit_sha, repo, scan_ms) for v in verdicts]
+
     headers = {"Authorization": f"Bearer {ingest_token}", "Content-Type": "application/json"}
     try:
         resp = httpx.post(ingest_url, json=payload, headers=headers, timeout=10.0)
         resp.raise_for_status()
-        logger.info("Scan metadata sent to ingest endpoint (HTTP %d)", resp.status_code)
+        count = len(payload) if isinstance(payload, list) else 1
+        logger.info(
+            "Scan metadata sent to ingest (%d finding(s), HTTP %d)", count, resp.status_code
+        )
     except Exception as exc:
         logger.warning("Failed to send to ingest endpoint (non-fatal): %s", exc)
 
@@ -77,12 +90,18 @@ def main() -> None:
     import time
 
     from .github.app_client import GitHubAppClient
-    from .github.pr_comment import COMMENT_MARKER, format_verdict_comment
+    from .github.pr_comment import (
+        COMMENT_MARKER,
+        format_inline_comment,
+        format_summary_comment,
+    )
     from .llm.orchestrator import LLMOrchestrator
     from .llm.providers.gemini import GeminiProvider
     from .llm.providers.groq import GroqProvider
     from .triage.engine import TriageEngine
     from .triage.verdicts import VerdictType
+
+    CHUNKED_DIFF_THRESHOLD = 100  # lines
 
     # ── Config ────────────────────────────────────────────────────────────────
     app_id = _get_env("GITHUB_APP_ID")
@@ -142,9 +161,23 @@ def main() -> None:
 
     # ── Analyze ───────────────────────────────────────────────────────────────
     t0 = time.monotonic()
-    verdict = engine.analyze_diff(raw_diff)
-    scan_ms = int((time.monotonic() - t0) * 1000)
+    diff_lines = raw_diff.count("\n")
 
+    if diff_lines > CHUNKED_DIFF_THRESHOLD:
+        logger.info("Large diff (%d lines) — using chunked analysis", diff_lines)
+        all_verdicts = engine.analyze_diff_chunked(raw_diff)
+        verdict = TriageEngine.aggregate_verdicts(all_verdicts)
+        logger.info(
+            "Aggregated %d chunk(s) → primary: %s [%s]",
+            len(all_verdicts),
+            verdict.verdict.value,
+            verdict.severity.value,
+        )
+    else:
+        verdict = engine.analyze_diff(raw_diff)
+        all_verdicts = [verdict]
+
+    scan_ms = int((time.monotonic() - t0) * 1000)
     logger.info(
         "Verdict: %s (confidence=%.2f, provider=%s, ms=%d)",
         verdict.verdict.value,
@@ -153,9 +186,33 @@ def main() -> None:
         scan_ms,
     )
 
-    # ── Post PR comment ───────────────────────────────────────────────────────
+    # ── Post inline review comments + top-level summary ───────────────────────
     sha_short = commit_sha[:7]
-    comment_body = format_verdict_comment(verdict, pr_number=pr_number, sha=sha_short)
+    any_inline_posted = False
+    for v in all_verdicts:
+        if v.line_number and v.file_path:
+            inline_body = format_inline_comment(v)
+            posted = app_client.create_review(
+                installation_id,
+                owner,
+                repo_name,
+                pr_number,
+                commit_sha,
+                v.file_path,
+                v.line_number,
+                inline_body,
+            )
+            if posted and v is verdict:
+                any_inline_posted = True
+
+    tp_count = len([v for v in all_verdicts if v.verdict == VerdictType.TRUE_POSITIVE])
+    comment_body = format_summary_comment(
+        verdict,
+        pr_number=pr_number,
+        sha=sha_short,
+        inline_posted=any_inline_posted,
+        total_findings=tp_count if tp_count > 1 else None,
+    )
     app_client.upsert_pr_comment(
         installation_id, owner, repo_name, pr_number, comment_body, COMMENT_MARKER
     )
@@ -163,8 +220,15 @@ def main() -> None:
 
     # ── Send metadata to dashboard ────────────────────────────────────────────
     if ingest_url and ingest_token:
+        ingest_payload = all_verdicts if len(all_verdicts) > 1 else verdict
         _send_to_ingest(
-            ingest_url, ingest_token, verdict, pr_number, commit_sha, target_repo, scan_ms
+            ingest_url,
+            ingest_token,
+            ingest_payload,
+            pr_number,
+            commit_sha,
+            target_repo,
+            scan_ms,
         )
 
     # ── Exit code ─────────────────────────────────────────────────────────────

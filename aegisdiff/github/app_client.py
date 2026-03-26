@@ -98,6 +98,57 @@ class GitHubAppClient:
         resp.raise_for_status()
         return resp.text
 
+    # ── Inline review comment ─────────────────────────────────────────────────
+
+    def create_review(
+        self,
+        installation_id: int,
+        owner: str,
+        repo: str,
+        pr_number: int,
+        commit_sha: str,
+        path: str,
+        line: int,
+        body: str,
+    ) -> bool:
+        """
+        Post an inline review comment on a specific line of a PR diff.
+
+        Mirrors GitHubClient.create_review but authenticates via App token.
+        Returns False if the line is not part of the diff (422) or on error.
+        """
+        import logging
+
+        logger = logging.getLogger(__name__)
+        token = self.get_installation_token(installation_id)
+        headers = {"Authorization": f"Bearer {token}", "Accept": self.ACCEPT}
+        payload = {
+            "commit_id": commit_sha,
+            "event": "COMMENT",
+            "comments": [{"path": path, "line": line, "side": "RIGHT", "body": body}],
+        }
+        try:
+            resp = httpx.post(
+                f"{self.BASE_URL}/repos/{owner}/{repo}/pulls/{pr_number}/reviews",
+                headers=headers,
+                json=payload,
+                timeout=15.0,
+            )
+            if resp.status_code == 422:
+                logger.warning(
+                    "Inline review rejected (line %d not in diff for %s) — "
+                    "falling back to top-level comment",
+                    line,
+                    path,
+                )
+                return False
+            resp.raise_for_status()
+            logger.info("Posted inline review on %s:%d (PR #%d)", path, line, pr_number)
+            return True
+        except httpx.HTTPError as exc:
+            logger.warning("Failed to post inline review comment: %s", exc)
+            return False
+
     # ── PR comment ────────────────────────────────────────────────────────────
 
     def upsert_pr_comment(
