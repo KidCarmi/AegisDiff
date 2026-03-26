@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@neondatabase/serverless": "^0.9.3",
+    "@sentry/nextjs": "^10.46.0",
     "jose": "^6.2.2",
     "next": "14.2.3",
     "next-auth": "^4.24.7",

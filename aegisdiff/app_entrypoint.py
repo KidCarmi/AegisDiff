@@ -34,6 +34,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger("aegisdiff.app_entrypoint")
 
+from .sentry import init_sentry  # noqa: E402
+
+init_sentry(release="aegisdiff@app-entrypoint")
+
 
 def _get_env(key: str, required: bool = True) -> str:
     val = os.environ.get(key, "")

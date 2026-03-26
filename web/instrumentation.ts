@@ -1,8 +1,16 @@
 /**
  * Next.js instrumentation hook — runs once on server startup (every cold start).
- * Applies all schema migrations idempotently so the DB stays in sync after deploys.
+ * Initialises Sentry, then applies all schema migrations idempotently.
  */
 export async function register() {
+  // Sentry — must init before any other imports so it catches early errors
+  if (process.env.NEXT_RUNTIME === "nodejs") {
+    await import("./sentry.server.config");
+  }
+  if (process.env.NEXT_RUNTIME === "edge") {
+    await import("./sentry.edge.config");
+  }
+
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
   if (!process.env.DATABASE_URL) return;
 

@@ -20,6 +20,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger("aegisdiff.entrypoint")
 
+from .sentry import init_sentry  # noqa: E402
+
+init_sentry(release="aegisdiff@entrypoint")
+
 
 def _verdict_to_status(verdict) -> tuple[str, str]:
     """Map a Verdict to a GitHub commit status state + description."""

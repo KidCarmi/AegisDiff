@@ -107,6 +107,8 @@ jobs:
           # Optional — bring your own keys for unlimited scans
           GEMINI_API_KEY:       ${{ secrets.GEMINI_API_KEY }}
           GROQ_API_KEY:         ${{ secrets.GROQ_API_KEY }}
+          # Optional — error tracking
+          SENTRY_DSN:           ${{ secrets.SENTRY_DSN }}
           GROQ_API_KEY_2:       ${{ secrets.GROQ_API_KEY_2 }}
           GROQ_API_KEY_3:       ${{ secrets.GROQ_API_KEY_3 }}
           # Legacy — no longer needed (OIDC handles auth automatically)
