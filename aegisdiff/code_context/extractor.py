@@ -590,7 +590,10 @@ class CodeContextExtractor:
         return edges
 
     def _check_sanitizers(
-        self, edges: List[DataFlowEdge], source_code: str, extra_keywords: Optional[List[str]] = None
+        self,
+        edges: List[DataFlowEdge],
+        source_code: str,
+        extra_keywords: Optional[List[str]] = None,
     ) -> bool:
         """Return True if any edge passes through a known sanitizer."""
         keywords = SANITIZER_KEYWORDS + (extra_keywords or [])
@@ -602,7 +605,10 @@ class CodeContextExtractor:
         return False
 
     def _describe_sanitizer(
-        self, edges: List[DataFlowEdge], source_code: str, extra_keywords: Optional[List[str]] = None
+        self,
+        edges: List[DataFlowEdge],
+        source_code: str,
+        extra_keywords: Optional[List[str]] = None,
     ) -> str:
         keywords = SANITIZER_KEYWORDS + (extra_keywords or [])
         for edge in edges:
