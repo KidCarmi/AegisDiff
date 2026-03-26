@@ -119,48 +119,72 @@ export async function POST(
     }
     let installationId = (rows[0] as any).installation_id as number;
 
-    // If the stored installation_id is stale, look up the current one via the App JWT.
-    // This handles re-installs, org transfers, or "Selected repositories" mode where
-    // the original installation may no longer cover this repo.
+    // Refresh stale installation_id (handles re-installs / org transfers)
     const freshId = await getRepoInstallationId(owner, name);
     if (freshId && freshId !== installationId) {
       installationId = freshId;
-      // Persist the corrected installation_id so future requests don't need the lookup
       await sql`UPDATE repos SET installation_id = ${freshId} WHERE owner = ${owner} AND name = ${name}`;
     }
 
-    // Scope the token to this specific repo — required when the App was installed
-    // with "Selected repositories" mode (avoids "Resource not accessible by integration")
-    const token = await getInstallationToken(installationId, { owner, name });
+    // Try App installation token first (scoped to this repo).
+    // Fall back to the user's own OAuth token if the App doesn't have access
+    // to the specific repo (e.g. "Selected repositories" install, wrong account).
+    // The user is already verified as repo:admin so their token is safe to use.
+    let token: string;
+    try {
+      token = await getInstallationToken(installationId, { owner, name });
+    } catch {
+      const userToken = (session as any)?.user?.accessToken as string | undefined;
+      if (!userToken) throw new Error("App token unavailable and no user OAuth token in session");
+      token = userToken;
+    }
 
     const ingestUrl = `${process.env.NEXTAUTH_URL ?? "https://aegis-diff.vercel.app"}/api/ingest`;
     const content = buildWorkflowContent(ingestUrl);
     const contentB64 = Buffer.from(content).toString("base64");
 
-    // Check if file already exists (need sha to update)
-    let existingSha: string | undefined;
-    try {
-      const existing = await ghFetch(
+    // Helper: try to commit the workflow file with a given token
+    async function commitWorkflow(t: string) {
+      let existingSha: string | undefined;
+      try {
+        const existing = await ghFetch(
+          `https://api.github.com/repos/${owner}/${name}/contents/${WORKFLOW_PATH}`,
+          t
+        );
+        existingSha = (existing as any).sha;
+      } catch {
+        // File doesn't exist yet — that's fine
+      }
+      await ghFetch(
         `https://api.github.com/repos/${owner}/${name}/contents/${WORKFLOW_PATH}`,
-        token
+        t,
+        "PUT",
+        {
+          message: existingSha
+            ? "Update AegisDiff security scanning workflow"
+            : "Add AegisDiff security scanning workflow",
+          content: contentB64,
+          ...(existingSha ? { sha: existingSha } : {}),
+        }
       );
-      existingSha = (existing as any).sha;
-    } catch {
-      // File doesn't exist yet — that's fine
+      return existingSha;
     }
 
-    await ghFetch(
-      `https://api.github.com/repos/${owner}/${name}/contents/${WORKFLOW_PATH}`,
-      token,
-      "PUT",
-      {
-        message: existingSha
-          ? "Update AegisDiff security scanning workflow"
-          : "Add AegisDiff security scanning workflow",
-        content: contentB64,
-        ...(existingSha ? { sha: existingSha } : {}),
+    // Try App token. If GitHub rejects it for this repo (403 "not accessible"),
+    // retry with the user's own OAuth token — they are repo:admin so it will work.
+    let existingSha: string | undefined;
+    try {
+      existingSha = await commitWorkflow(token);
+    } catch (appErr: any) {
+      if (appErr?.message?.includes("403") || appErr?.message?.includes("not accessible")) {
+        const userToken = (session as any)?.user?.accessToken as string | undefined;
+        if (!userToken) throw appErr;
+        console.warn("[setup-workflow] App token rejected, retrying with user OAuth token");
+        existingSha = await commitWorkflow(userToken);
+      } else {
+        throw appErr;
       }
-    );
+    }
 
     return NextResponse.json({ ok: true, updated: !!existingSha });
   } catch (err: any) {
