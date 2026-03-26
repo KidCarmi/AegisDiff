@@ -126,7 +126,12 @@ def main() -> None:
 
     from .config import load_config
     from .github.client import GitHubClient
-    from .github.pr_comment import COMMENT_MARKER, format_verdict_comment
+    from .github.pr_comment import (
+        COMMENT_MARKER,
+        format_inline_comment,
+        format_summary_comment,
+        format_verdict_comment,
+    )
     from .llm.orchestrator import LLMOrchestrator
     from .llm.providers.gemini import GeminiProvider
     from .llm.providers.groq import GroqProvider
@@ -187,22 +192,49 @@ def main() -> None:
     verdict = engine.analyze_diff(raw_diff)
     scan_ms = int((time.monotonic() - t0) * 1000)
 
-    # Format comment
     sha_short = cfg.commit_sha[:7]
-    comment_body = format_verdict_comment(
-        verdict,
-        pr_number=cfg.pr_number or 0,
-        sha=sha_short,
-    )
 
     # Post to PR + commit status (if we have the needed context)
     if cfg.pr_number and cfg.github_token and cfg.repo:
         client = GitHubClient(cfg.github_token, cfg.repo)
+
+        # ── Inline review comment (Phase 2) ─────────────────────────────
+        # When the AST extractor resolved a sink line, post the evidence
+        # and remediation as an inline comment on that exact line.
+        # Falls back to embedding the detail in the top-level comment if
+        # the line is not part of this diff (GitHub returns 422).
+        inline_posted = False
+        if verdict.line_number and verdict.file_path:
+            inline_body = format_inline_comment(verdict)
+            inline_posted = client.create_review(
+                cfg.pr_number,
+                cfg.commit_sha,
+                verdict.file_path,
+                verdict.line_number,
+                inline_body,
+            )
+
+        # ── Top-level summary comment ────────────────────────────────────
+        # Always posted. When inline succeeded, omits evidence (it's inline).
+        # When inline failed/unavailable, includes full evidence as fallback.
+        comment_body = format_summary_comment(
+            verdict,
+            pr_number=cfg.pr_number,
+            sha=sha_short,
+            inline_posted=inline_posted,
+        )
         client.upsert_pr_comment(cfg.pr_number, comment_body, COMMENT_MARKER)
+
         # Post commit status so result appears in the PR merge checklist
         status_state, status_desc = _verdict_to_status(verdict)
         client.post_commit_status(cfg.commit_sha, status_state, status_desc)
     else:
+        # No PR context — print full comment to stdout (local / workflow_dispatch)
+        comment_body = format_verdict_comment(
+            verdict,
+            pr_number=cfg.pr_number or 0,
+            sha=sha_short,
+        )
         print(comment_body)
 
     # Send metadata to dashboard (no code content)

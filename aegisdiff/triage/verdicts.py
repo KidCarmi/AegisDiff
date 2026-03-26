@@ -43,6 +43,9 @@ class Verdict:
     remediation: Optional[str]
     false_positive_reason: Optional[str]
     provider: str = "unknown"
+    # Inline comment targeting — set when AST sink detection resolves a line
+    line_number: Optional[int] = None
+    file_path: Optional[str] = None
 
     @classmethod
     def no_op(cls) -> "Verdict":

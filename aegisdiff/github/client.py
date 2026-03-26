@@ -76,6 +76,61 @@ class GitHubClient:
         except httpx.HTTPError as e:
             logger.warning("Failed to update PR comment #%d: %s", comment_id, e)
 
+    def create_review(
+        self,
+        pr_number: int,
+        commit_sha: str,
+        path: str,
+        line: int,
+        body: str,
+    ) -> bool:
+        """
+        Post an inline review comment on a specific line of a PR diff.
+
+        Uses the Pull Request Reviews API so the comment appears inline on the
+        changed file. Returns False if the line is not part of the diff
+        (GitHub returns 422) or any other error occurs — caller should fall
+        back to a top-level comment.
+
+        Args:
+            pr_number: PR number.
+            commit_sha: Full SHA of the HEAD commit being reviewed.
+            path: File path relative to repo root (e.g. "src/app.py").
+            line: Line number in the new version of the file (RIGHT side).
+            body: Markdown body for the inline comment.
+        """
+        url = f"{GITHUB_API_BASE}/repos/{self._repo}/pulls/{pr_number}/reviews"
+        payload = {
+            "commit_id": commit_sha,
+            "event": "COMMENT",
+            "comments": [
+                {
+                    "path": path,
+                    "line": line,
+                    "side": "RIGHT",
+                    "body": body,
+                }
+            ],
+        }
+        try:
+            resp = httpx.post(url, headers=self._headers, json=payload, timeout=15.0)
+            if resp.status_code == 422:
+                logger.warning(
+                    "Inline review rejected (line %d not in diff for %s) — "
+                    "will fall back to top-level comment",
+                    line,
+                    path,
+                )
+                return False
+            resp.raise_for_status()
+            logger.info(
+                "Posted inline review comment on %s:%d (PR #%d)", path, line, pr_number
+            )
+            return True
+        except httpx.HTTPError as e:
+            logger.warning("Failed to post inline review comment: %s", e)
+            return False
+
     def post_commit_status(
         self,
         sha: str,

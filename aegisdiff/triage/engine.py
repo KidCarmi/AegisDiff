@@ -68,6 +68,14 @@ class TriageEngine:
             response = self._orchestrator.complete(request)
             verdict = parse_verdict(response.content, provider=response.provider)
 
+            # Annotate with primary sink location for inline PR comment targeting.
+            # Only set when a real sink was detected (line_number > 0).
+            if context.paths:
+                primary_sink = context.paths[0].sink
+                if primary_sink.line_number > 0:
+                    verdict.line_number = primary_sink.line_number
+                    verdict.file_path = primary_sink.file_path
+
             elapsed_ms = int((time.monotonic() - t0) * 1000)
             logger.info(
                 "Verdict: %s [%s] confidence=%.2f via %s in %dms",
