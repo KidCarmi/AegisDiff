@@ -201,10 +201,10 @@ export default async function DashboardPage() {
           <div className="flex items-start gap-4">
             <div className="text-3xl">⏳</div>
             <div className="flex-1">
-              <h2 className="text-base font-semibold text-blue-900 mb-1">
+              <h2 className="text-base font-semibold text-blue-900 dark:text-blue-100 mb-1">
                 Waiting for your first scan
               </h2>
-              <p className="text-sm text-blue-700 mb-4">
+              <p className="text-sm text-blue-700 dark:text-blue-300 mb-4">
                 Your repo is connected. Open a pull request to trigger the first
                 security analysis — results appear here within ~90 seconds.
               </p>
@@ -235,7 +235,7 @@ export default async function DashboardPage() {
       {/* Scan list */}
       <div>
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-800">Recent Scans</h2>
+          <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100">Recent Scans</h2>
         </div>
         <ScanList scans={scans} />
       </div>

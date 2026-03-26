@@ -81,7 +81,7 @@ export default async function ReposPage() {
   return (
     <div>
       <div className="mb-6 flex items-center justify-between flex-wrap gap-3">
-        <h1 className="text-2xl font-bold text-gray-900">Connected Repositories</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-50">Connected Repositories</h1>
         <div className="flex gap-2">
           <a href={`https://github.com/apps/${appSlug}/installations/new`} target="_blank"
             rel="noopener noreferrer"
@@ -96,9 +96,9 @@ export default async function ReposPage() {
       </div>
 
       {repos.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-gray-300 p-12 text-center">
-          <p className="text-gray-500 font-medium">No repositories connected yet.</p>
-          <p className="mt-2 text-sm text-gray-400 mb-6">
+        <div className="rounded-lg border border-dashed border-gray-300 dark:border-gray-700 p-12 text-center">
+          <p className="text-gray-500 dark:text-gray-400 font-medium">No repositories connected yet.</p>
+          <p className="mt-2 text-sm text-gray-400 dark:text-gray-500 mb-6">
             Install the GitHub App for zero-config setup, or connect manually with your own API keys.
           </p>
           <div className="flex justify-center gap-3">
@@ -108,7 +108,7 @@ export default async function ReposPage() {
               Install GitHub App (recommended)
             </a>
             <a href="/repos/connect"
-              className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+              className="rounded-lg border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800">
               Manual setup
             </a>
           </div>
@@ -120,25 +120,25 @@ export default async function ReposPage() {
             const tp = parseInt(repo.truePositives, 10);
             const score = securityScore(total, tp);
             return (
-              <div key={repo.id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm hover:shadow-md transition-shadow">
+              <div key={repo.id} className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4 shadow-sm hover:shadow-md transition-shadow">
                 <div className="flex items-center justify-between">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <a href={`/repos/${repo.owner}/${repo.name}`}
-                        className="font-mono font-semibold text-gray-900 hover:text-blue-600 truncate">
+                        className="font-mono font-semibold text-gray-900 dark:text-gray-50 hover:text-blue-600 truncate">
                         {repo.owner}/{repo.name}
                       </a>
                       {repo.appInstalled ? (
-                        <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-700/10">
+                        <span className="rounded-full bg-blue-50 dark:bg-blue-950 px-2 py-0.5 text-xs font-medium text-blue-700 dark:text-blue-300 ring-1 ring-inset ring-blue-700/10">
                           GitHub App
                         </span>
                       ) : (
-                        <span className="rounded-full bg-gray-50 px-2 py-0.5 text-xs font-medium text-gray-600 ring-1 ring-inset ring-gray-500/10">
+                        <span className="rounded-full bg-gray-50 dark:bg-gray-800 px-2 py-0.5 text-xs font-medium text-gray-600 dark:text-gray-300 ring-1 ring-inset ring-gray-500/10">
                           Manual
                         </span>
                       )}
                     </div>
-                    <div className="flex items-center gap-3 mt-1 text-xs text-gray-400 flex-wrap">
+                    <div className="flex items-center gap-3 mt-1 text-xs text-gray-400 dark:text-gray-500 flex-wrap">
                       <span>Connected {new Date(repo.createdAt).toLocaleDateString()}</span>
                       {total > 0 && <span>{total} scans (30d)</span>}
                       {tp > 0 && <span className="text-red-500">{tp} issue{tp !== 1 ? "s" : ""}</span>}
@@ -150,13 +150,13 @@ export default async function ReposPage() {
                     {score !== null && (
                       <div className="text-center">
                         <div className={`text-xl font-bold ${scoreColor(score)}`}>{score}</div>
-                        <div className="text-[10px] text-gray-400">score</div>
+                        <div className="text-[10px] text-gray-400 dark:text-gray-500">score</div>
                       </div>
                     )}
                     <div className="flex gap-2 text-xs">
                       <a href={`https://github.com/${repo.owner}/${repo.name}`}
                         target="_blank" rel="noopener noreferrer"
-                        className="text-gray-400 hover:text-gray-700">GitHub ↗</a>
+                        className="text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">GitHub ↗</a>
                       <a href={`/repos/${repo.owner}/${repo.name}`}
                         className="text-blue-600 hover:underline">Details →</a>
                     </div>
@@ -169,7 +169,7 @@ export default async function ReposPage() {
         </div>
       )}
       {repos.length > 0 && (
-        <p className="mt-4 text-xs text-gray-400">
+        <p className="mt-4 text-xs text-gray-400 dark:text-gray-500">
           Security score = 100 − TP rate over last 30 days. Click any repo for full details.
         </p>
       )}

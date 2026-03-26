@@ -55,10 +55,10 @@ function StepDots({ total, current }: { total: number; current: number }) {
           key={i}
           className={`rounded-full transition-all ${
             i + 1 === current
-              ? "w-6 h-2 bg-gray-900"
+              ? "w-6 h-2 bg-gray-900 dark:bg-gray-100"
               : i + 1 < current
-              ? "w-2 h-2 bg-gray-400"
-              : "w-2 h-2 bg-gray-200"
+              ? "w-2 h-2 bg-gray-400 dark:bg-gray-500"
+              : "w-2 h-2 bg-gray-200 dark:bg-gray-700"
           }`}
         />
       ))}
@@ -72,10 +72,10 @@ function StepWelcome({ username, onNext }: { username: string; onNext: () => voi
     <div>
       <StepDots total={3} current={1} />
       <div className="mb-2 text-4xl">🛡️</div>
-      <h1 className="text-2xl font-bold text-gray-900 mb-2">
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-50 mb-2">
         Welcome{username ? `, @${username}` : ""}!
       </h1>
-      <p className="text-gray-500 mb-8 leading-relaxed max-w-md">
+      <p className="text-gray-500 dark:text-gray-400 mb-8 leading-relaxed max-w-md">
         AegisDiff automatically analyzes every pull request for security vulnerabilities.
         A cynical AI AppSec engineer reviews each diff — trying to disprove issues, not
         just flag them. Let&apos;s get you set up.
@@ -87,10 +87,10 @@ function StepWelcome({ username, onNext }: { username: string; onNext: () => voi
           { icon: "🔒", label: "Zero code egress", desc: "your code stays on GitHub" },
           { icon: "💰", label: "$0/month", desc: "runs on free tiers" },
         ].map((item) => (
-          <div key={item.label} className="rounded-xl border border-gray-100 bg-gray-50 p-4 text-center">
+          <div key={item.label} className="rounded-xl border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 p-4 text-center">
             <div className="text-2xl mb-1">{item.icon}</div>
-            <div className="text-sm font-semibold text-gray-800">{item.label}</div>
-            <div className="text-xs text-gray-400 mt-0.5">{item.desc}</div>
+            <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">{item.label}</div>
+            <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{item.desc}</div>
           </div>
         ))}
       </div>
@@ -116,8 +116,8 @@ function StepChoose({
   return (
     <div>
       <StepDots total={3} current={2} />
-      <h2 className="text-xl font-bold text-gray-900 mb-1">Connect a repository</h2>
-      <p className="text-gray-500 text-sm mb-6">Choose how you want to integrate AegisDiff.</p>
+      <h2 className="text-xl font-bold text-gray-900 dark:text-gray-50 mb-1">Connect a repository</h2>
+      <p className="text-gray-500 dark:text-gray-400 text-sm mb-6">Choose how you want to integrate AegisDiff.</p>
 
       <div className="space-y-3 mb-6">
         {/* GitHub App card */}
@@ -152,23 +152,23 @@ function StepChoose({
         {/* Manual card */}
         <button
           onClick={() => onChoose("manual")}
-          className="w-full text-left rounded-xl border border-gray-200 bg-white p-5 hover:bg-gray-50 transition-colors group"
+          className="w-full text-left rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-5 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors group"
         >
           <div className="flex items-start justify-between">
             <div className="flex-1">
               <div className="flex items-center gap-2 mb-1">
-                <span className="text-sm font-bold text-gray-800">Manual workflow</span>
-                <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500">
+                <span className="text-sm font-bold text-gray-800 dark:text-gray-100">Manual workflow</span>
+                <span className="rounded-full bg-gray-100 dark:bg-gray-800 px-2 py-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">
                   Advanced
                 </span>
               </div>
-              <p className="text-xs text-gray-500 leading-relaxed">
+              <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
                 Copy a workflow file into your repo. Bring your own Gemini or Groq API keys.
                 Full control over every step.
               </p>
               <div className="mt-3 flex gap-2 flex-wrap">
                 {["Your API keys", "Full control", "Open source"].map((tag) => (
-                  <span key={tag} className="rounded-md bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
+                  <span key={tag} className="rounded-md bg-gray-100 dark:bg-gray-800 px-2 py-0.5 text-xs text-gray-600 dark:text-gray-300">
                     {tag}
                   </span>
                 ))}
@@ -179,7 +179,7 @@ function StepChoose({
         </button>
       </div>
 
-      <a href="/dashboard" className="text-xs text-gray-400 hover:text-gray-600">
+      <a href="/dashboard" className="text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400">
         Skip for now →
       </a>
     </div>
@@ -199,12 +199,12 @@ function StepAppInstall({
   return (
     <div>
       <StepDots total={3} current={3} />
-      <h2 className="text-xl font-bold text-gray-900 mb-1">Install the GitHub App</h2>
-      <p className="text-gray-500 text-sm mb-6">
+      <h2 className="text-xl font-bold text-gray-900 dark:text-gray-50 mb-1">Install the GitHub App</h2>
+      <p className="text-gray-500 dark:text-gray-400 text-sm mb-6">
         Select the repos you want to scan. AegisDiff handles everything from there.
       </p>
 
-      <div className="rounded-xl border border-gray-200 bg-white p-5 mb-6 space-y-3">
+      <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-5 mb-6 space-y-3">
         {[
           { done: true, text: "Signed in with GitHub" },
           { done: clicked, text: "Install AegisDiff on your repos" },
@@ -214,13 +214,13 @@ function StepAppInstall({
             <div
               className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
                 step.done
-                  ? "bg-green-100 text-green-700"
-                  : "bg-gray-100 text-gray-400"
+                  ? "bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300"
+                  : "bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500"
               }`}
             >
               {step.done ? "✓" : i + 1}
             </div>
-            <span className={`text-sm ${step.done ? "text-gray-400 line-through" : "text-gray-700"}`}>
+            <span className={`text-sm ${step.done ? "text-gray-400 dark:text-gray-500 line-through" : "text-gray-700 dark:text-gray-200"}`}>
               {step.text}
             </span>
           </div>
@@ -241,7 +241,7 @@ function StepAppInstall({
         {clicked && (
           <button
             onClick={onDone}
-            className="rounded-xl border border-gray-200 bg-white px-5 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
+            className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-5 py-3 text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
           >
             I&apos;ve installed it →
           </button>
@@ -256,19 +256,19 @@ function StepManualSetup({ ingestUrl, onDone }: { ingestUrl: string; onDone: () 
   return (
     <div>
       <StepDots total={3} current={3} />
-      <h2 className="text-xl font-bold text-gray-900 mb-1">Manual setup</h2>
-      <p className="text-gray-500 text-sm mb-6">
+      <h2 className="text-xl font-bold text-gray-900 dark:text-gray-50 mb-1">Manual setup</h2>
+      <p className="text-gray-500 dark:text-gray-400 text-sm mb-6">
         Three steps — takes about 2 minutes.
       </p>
 
       <div className="space-y-5 mb-8">
         {/* Step 1 */}
-        <div className="rounded-xl border border-gray-200 bg-white p-5">
+        <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-5">
           <div className="flex items-center gap-2 mb-3">
             <span className="w-5 h-5 rounded-full bg-gray-900 text-white text-xs font-bold flex items-center justify-center">1</span>
-            <span className="text-sm font-semibold text-gray-800">Add your LLM API key</span>
+            <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">Add your LLM API key</span>
           </div>
-          <p className="text-xs text-gray-500 mb-3">
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
             Get a free key from{" "}
             <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
               Google AI Studio
@@ -280,31 +280,31 @@ function StepManualSetup({ ingestUrl, onDone }: { ingestUrl: string; onDone: () 
             . Add it as a secret in your repo.
           </p>
           <div className="flex gap-2 flex-wrap">
-            <code className="rounded-md bg-gray-100 px-2 py-1 text-xs font-mono">GEMINI_API_KEY</code>
-            <span className="text-xs text-gray-400 self-center">or</span>
-            <code className="rounded-md bg-gray-100 px-2 py-1 text-xs font-mono">GROQ_API_KEY</code>
+            <code className="rounded-md bg-gray-100 dark:bg-gray-800 px-2 py-1 text-xs font-mono text-gray-700 dark:text-gray-200">GEMINI_API_KEY</code>
+            <span className="text-xs text-gray-400 dark:text-gray-500 self-center">or</span>
+            <code className="rounded-md bg-gray-100 dark:bg-gray-800 px-2 py-1 text-xs font-mono text-gray-700 dark:text-gray-200">GROQ_API_KEY</code>
           </div>
         </div>
 
         {/* Step 2 */}
-        <div className="rounded-xl border border-gray-200 bg-white p-5">
+        <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-5">
           <div className="flex items-center gap-2 mb-3">
             <span className="w-5 h-5 rounded-full bg-gray-900 text-white text-xs font-bold flex items-center justify-center">2</span>
-            <span className="text-sm font-semibold text-gray-800">Add the ingest URL secret</span>
+            <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">Add the ingest URL secret</span>
           </div>
-          <p className="text-xs text-gray-500 mb-3">
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
             This tells the workflow where to send scan results. Auth is automatic via GitHub OIDC.
           </p>
           <SecretRow name="AEGISDIFF_INGEST_URL" value={ingestUrl} />
         </div>
 
         {/* Step 3 */}
-        <div className="rounded-xl border border-gray-200 bg-white p-5">
+        <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-5">
           <div className="flex items-center gap-2 mb-3">
             <span className="w-5 h-5 rounded-full bg-gray-900 text-white text-xs font-bold flex items-center justify-center">3</span>
-            <span className="text-sm font-semibold text-gray-800">Copy the workflow file</span>
+            <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">Copy the workflow file</span>
           </div>
-          <p className="text-xs text-gray-500 mb-3">
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
             Add this file to your repo at{" "}
             <code className="bg-gray-100 px-1 rounded text-gray-700">.github/workflows/aegisdiff.yml</code>
           </p>
@@ -335,15 +335,15 @@ function StepDone({ method }: { method: Method }) {
   return (
     <div>
       <div className="mb-4 text-5xl">🎉</div>
-      <h2 className="text-2xl font-bold text-gray-900 mb-2">You&apos;re all set!</h2>
-      <p className="text-gray-500 text-sm mb-8 max-w-md leading-relaxed">
+      <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-50 mb-2">You&apos;re all set!</h2>
+      <p className="text-gray-500 dark:text-gray-400 text-sm mb-8 max-w-md leading-relaxed">
         {method === "app"
           ? "The GitHub App is installed. Open any pull request on a connected repo — AegisDiff will post a security analysis as a comment within ~90 seconds."
           : "The workflow is set up. Open any pull request and AegisDiff will automatically analyze it for security vulnerabilities."}
       </p>
 
-      <div className="rounded-xl border border-green-200 bg-green-50 p-5 mb-8">
-        <p className="text-sm font-semibold text-green-800 mb-3">What happens next</p>
+      <div className="rounded-xl border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950 p-5 mb-8">
+        <p className="text-sm font-semibold text-green-800 dark:text-green-200 mb-3">What happens next</p>
         <div className="space-y-2">
           {[
             "Open a pull request in a connected repo",
@@ -351,7 +351,7 @@ function StepDone({ method }: { method: Method }) {
             "A verdict comment is posted on your PR",
             "Results appear here in your dashboard",
           ].map((step, i) => (
-            <div key={i} className="flex items-center gap-3 text-sm text-green-700">
+            <div key={i} className="flex items-center gap-3 text-sm text-green-700 dark:text-green-300">
               <span className="text-green-500 font-bold">{i + 1}.</span>
               {step}
             </div>
@@ -371,7 +371,7 @@ function StepDone({ method }: { method: Method }) {
         </a>
         <a
           href="/repos"
-          className="rounded-xl border border-gray-200 bg-white px-6 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
+          className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-6 py-3 text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
         >
           Manage repos
         </a>
