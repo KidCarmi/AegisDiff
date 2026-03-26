@@ -137,9 +137,7 @@ def _send_to_ingest(
     if isinstance(verdicts, _Verdict):
         payload = _build_ingest_item(verdicts, pr_number, commit_sha, repo, scan_ms)
     else:
-        payload = [
-            _build_ingest_item(v, pr_number, commit_sha, repo, scan_ms) for v in verdicts
-        ]
+        payload = [_build_ingest_item(v, pr_number, commit_sha, repo, scan_ms) for v in verdicts]
 
     headers = {"Authorization": f"Bearer {auth_token}", "Content-Type": "application/json"}
     try:

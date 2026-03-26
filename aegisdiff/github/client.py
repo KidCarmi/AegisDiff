@@ -123,9 +123,7 @@ class GitHubClient:
                 )
                 return False
             resp.raise_for_status()
-            logger.info(
-                "Posted inline review comment on %s:%d (PR #%d)", path, line, pr_number
-            )
+            logger.info("Posted inline review comment on %s:%d (PR #%d)", path, line, pr_number)
             return True
         except httpx.HTTPError as e:
             logger.warning("Failed to post inline review comment: %s", e)
