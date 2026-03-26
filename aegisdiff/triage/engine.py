@@ -76,6 +76,27 @@ class TriageEngine:
                 logger.info("No relevant lines in diff — skipping LLM call")
                 return Verdict.no_op()
 
+            # ── aegisdiff-ignore suppression ─────────────────────────────
+            # If every detected sink is suppressed by an inline comment,
+            # short-circuit with FALSE_POSITIVE — no LLM call needed.
+            if context.paths:
+                suppressed_sinks = [p.sink for p in context.paths if p.sink.suppressed]
+                all_suppressed = len(suppressed_sinks) == len(context.paths)
+                if all_suppressed:
+                    primary = suppressed_sinks[0]
+                    reason = primary.ignore_reason or "aegisdiff-ignore comment"
+                    cwe_tag = f" ({primary.ignore_cwe})" if primary.ignore_cwe else ""
+                    logger.info(
+                        "All sinks suppressed by aegisdiff-ignore%s — skipping LLM call", cwe_tag
+                    )
+                    v = Verdict.suppressed(
+                        cwe_id=primary.ignore_cwe or "N/A",
+                        reason=reason,
+                        file_path=primary.file_path,
+                        line_number=primary.line_number,
+                    )
+                    return v
+
             request = LLMRequest(
                 system_prompt=APPSEC_SYSTEM_PROMPT,
                 user_message=build_user_message(context),

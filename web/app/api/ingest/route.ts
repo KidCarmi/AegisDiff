@@ -236,7 +236,7 @@ export async function POST(req: NextRequest) {
     FROM repos WHERE id = ${repoId} LIMIT 1`;
   const meta = repoMeta[0] as any ?? {};
 
-  // Insert one scan row per finding
+  // Insert one scan row per finding; persist ignore_rules for suppressed findings
   for (const payload of payloads) {
     const confidence = typeof payload.confidence === "number" && isFinite(payload.confidence)
       ? Math.max(0, Math.min(1, payload.confidence)) : null;
@@ -248,6 +248,17 @@ export async function POST(req: NextRequest) {
               ${payload.pr_url ?? null}, ${payload.verdict}, ${payload.severity ?? null},
               ${payload.cwe_id ?? null}, ${confidence}, ${title},
               ${payload.provider ?? null}, ${payload.scan_ms ?? null})`;
+
+    // Phase 4: persist aegisdiff-ignore suppressions as ignore_rules so they
+    // show up in the dashboard and apply to future scans of the same repo.
+    if (payload.suppressed && (payload.cwe_id || payload.ignore_reason)) {
+      const cwe = payload.cwe_id && payload.cwe_id !== "N/A" ? payload.cwe_id : null;
+      const reason = payload.ignore_reason?.slice(0, 200) ?? null;
+      await sql`
+        INSERT INTO ignore_rules (repo_id, cwe_id, reason)
+        VALUES (${repoId}, ${cwe}, ${reason})
+        ON CONFLICT DO NOTHING`;
+    }
   }
 
   // Audit log — one entry summarising the batch

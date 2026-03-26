@@ -41,6 +41,9 @@ export interface IngestPayload {
   commit_sha: string;
   pr_url: string | null;
   scan_ms: number;
+  // Phase 4 — aegisdiff-ignore suppression
+  suppressed?: boolean;
+  ignore_reason?: string | null;
 }
 
 export const VERDICT_COLORS: Record<VerdictType, string> = {

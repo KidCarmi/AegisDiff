@@ -16,6 +16,10 @@ class Sink:
     argument_expressions: List[str]
     sink_category: str  # "sql_exec" | "cmd_exec" | "file_write" | "deserialize"
     raw_code: str
+    # Set when an `# aegisdiff-ignore` comment suppresses this sink
+    suppressed: bool = False
+    ignore_cwe: Optional[str] = None     # e.g. "CWE-89"
+    ignore_reason: Optional[str] = None  # free-text reason from the comment
 
 
 @dataclass

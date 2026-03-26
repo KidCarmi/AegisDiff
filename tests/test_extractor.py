@@ -137,3 +137,72 @@ class TestFullExtraction:
         context = extractor.extract_from_diff(empty_diff)
         assert context.changed_files == []
         assert context.paths == []
+
+
+class TestIgnoreSuppression:
+    """aegisdiff-ignore comment detection in _find_sinks."""
+
+    def _make_extractor(self, tmp_path):
+        return CodeContextExtractor(tmp_path)
+
+    def test_ignore_on_same_line(self, tmp_path):
+        ext = self._make_extractor(tmp_path)
+        lines = ['cursor.execute(query)  # aegisdiff-ignore: CWE-89 reason: test only']
+        suppressed, cwe, reason = ext._check_ignore_comment(lines, 0)
+        assert suppressed is True
+        assert cwe == "CWE-89"
+        assert reason == "test only"
+
+    def test_ignore_on_line_above(self, tmp_path):
+        ext = self._make_extractor(tmp_path)
+        lines = ['# aegisdiff-ignore: CWE-89', 'cursor.execute(query)']
+        suppressed, cwe, reason = ext._check_ignore_comment(lines, 1)
+        assert suppressed is True
+        assert cwe == "CWE-89"
+
+    def test_ignore_no_cwe_no_reason(self, tmp_path):
+        ext = self._make_extractor(tmp_path)
+        lines = ['# aegisdiff-ignore', 'cursor.execute(query)']
+        suppressed, cwe, reason = ext._check_ignore_comment(lines, 1)
+        assert suppressed is True
+        assert cwe is None
+        assert reason is None
+
+    def test_no_ignore_comment(self, tmp_path):
+        ext = self._make_extractor(tmp_path)
+        lines = ['# some other comment', 'cursor.execute(query)']
+        suppressed, cwe, reason = ext._check_ignore_comment(lines, 1)
+        assert suppressed is False
+
+    def test_suppressed_sink_in_full_extraction(self, tmp_path):
+        """Sinks annotated with aegisdiff-ignore are marked suppressed=True."""
+        views_dir = tmp_path / "app"
+        views_dir.mkdir()
+        (views_dir / "views.py").write_text(
+            "from django.db import connection\n"
+            "\n"
+            "def get_user(request):\n"
+            '    user_id = request.GET.get("id")\n'
+            "    cursor = connection.cursor()\n"
+            "    # aegisdiff-ignore: CWE-89 reason: parameterized in prod\n"
+            '    cursor.execute(f"SELECT * FROM users WHERE id = {user_id}")\n'
+        )
+        diff = (
+            "diff --git a/app/views.py b/app/views.py\n"
+            "--- a/app/views.py\n"
+            "+++ b/app/views.py\n"
+            "@@ -1,7 +1,7 @@\n"
+            "+from django.db import connection\n"
+            "+\n"
+            "+def get_user(request):\n"
+            '+    user_id = request.GET.get("id")\n'
+            "+    cursor = connection.cursor()\n"
+            "+    # aegisdiff-ignore: CWE-89 reason: parameterized in prod\n"
+            '+    cursor.execute(f"SELECT * FROM users WHERE id = {user_id}")\n'
+        )
+        extractor = CodeContextExtractor(tmp_path)
+        context = extractor.extract_from_diff(diff)
+        suppressed_sinks = [p.sink for p in context.paths if p.sink.suppressed]
+        assert len(suppressed_sinks) >= 1
+        assert suppressed_sinks[0].ignore_cwe == "CWE-89"
+        assert suppressed_sinks[0].ignore_reason == "parameterized in prod"

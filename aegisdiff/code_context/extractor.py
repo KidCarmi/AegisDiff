@@ -31,6 +31,18 @@ from .models import (
 
 logger = logging.getLogger(__name__)
 
+# Matches: # aegisdiff-ignore[: CWE-NNN] [reason: ...]
+# CWE and reason are both optional.  Examples:
+#   # aegisdiff-ignore
+#   # aegisdiff-ignore: CWE-89
+#   # aegisdiff-ignore: CWE-89 reason: test fixture only
+_IGNORE_RE = re.compile(
+    r"#\s*aegisdiff-ignore"
+    r"(?:\s*:\s*(?P<cwe>CWE-\d+))?"
+    r"(?:\s+reason\s*:\s*(?P<reason>.+?))?$",
+    re.IGNORECASE,
+)
+
 # ── Sink query patterns (tree-sitter query syntax) ─────────────────────────
 
 PYTHON_SINK_PATTERNS: Dict[str, re.Pattern] = {
@@ -244,6 +256,10 @@ class CodeContextExtractor:
                 if pattern.search(line):
                     m = pattern.search(line)
                     func_name = m.group(0).rstrip("(").strip() if m else "<unknown>"
+                    # Check for aegisdiff-ignore on this line or the line above
+                    suppressed, ignore_cwe, ignore_reason = self._check_ignore_comment(
+                        lines, ln_idx
+                    )
                     sinks.append(
                         Sink(
                             file_path=file_path,
@@ -252,10 +268,31 @@ class CodeContextExtractor:
                             argument_expressions=self._extract_call_args(line),
                             sink_category=category,
                             raw_code=line.strip(),
+                            suppressed=suppressed,
+                            ignore_cwe=ignore_cwe,
+                            ignore_reason=ignore_reason,
                         )
                     )
                     break  # One sink category per line is enough
         return sinks
+
+    @staticmethod
+    def _check_ignore_comment(
+        lines: List[str], sink_idx: int
+    ) -> tuple[bool, Optional[str], Optional[str]]:
+        """
+        Look for an aegisdiff-ignore comment on the sink line or the line above.
+
+        Returns (suppressed, cwe_id, reason).
+        """
+        candidates = [lines[sink_idx]]
+        if sink_idx > 0:
+            candidates.append(lines[sink_idx - 1])
+        for candidate in candidates:
+            m = _IGNORE_RE.search(candidate)
+            if m:
+                return True, m.group("cwe"), (m.group("reason") or "").strip() or None
+        return False, None, None
 
     def _find_sources(
         self, source_code: str, changed_line_set: Set[int], file_path: str

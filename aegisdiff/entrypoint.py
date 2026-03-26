@@ -98,7 +98,7 @@ def _get_oidc_token() -> str | None:
 
 def _build_ingest_item(verdict, pr_number, commit_sha, repo, scan_ms: int) -> dict:
     """Build a single ingest metadata dict for one Verdict."""
-    return {
+    item: dict = {
         "verdict": verdict.verdict.value,
         "severity": verdict.severity.value,
         "cwe_id": verdict.cwe_id,
@@ -110,6 +110,11 @@ def _build_ingest_item(verdict, pr_number, commit_sha, repo, scan_ms: int) -> di
         "pr_url": f"https://github.com/{repo}/pull/{pr_number}" if pr_number else None,
         "scan_ms": scan_ms,
     }
+    # Include suppression metadata so the dashboard can persist ignore_rules
+    if verdict.false_positive_reason and "aegisdiff-ignore" in verdict.title.lower():
+        item["suppressed"] = True
+        item["ignore_reason"] = verdict.false_positive_reason
+    return item
 
 
 def _send_to_ingest(

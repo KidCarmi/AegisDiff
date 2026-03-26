@@ -66,6 +66,33 @@ class Verdict:
         )
 
     @classmethod
+    def suppressed(
+        cls,
+        cwe_id: str,
+        reason: str,
+        file_path: Optional[str] = None,
+        line_number: Optional[int] = None,
+    ) -> "Verdict":
+        """Return a FALSE_POSITIVE verdict for an aegisdiff-ignore suppressed sink."""
+        title = f"Suppressed by aegisdiff-ignore: {reason}"[:80]
+        return cls(
+            verdict=VerdictType.FALSE_POSITIVE,
+            severity=Severity.NA,
+            cwe_id=cwe_id,
+            confidence=0.99,
+            title=title,
+            summary=f"Finding suppressed by inline `aegisdiff-ignore` comment. Reason: {reason}",
+            evidence="",
+            sanitizer_found=False,
+            sanitizer_description=None,
+            attack_vector=None,
+            remediation=None,
+            false_positive_reason=reason,
+            file_path=file_path,
+            line_number=line_number,
+        )
+
+    @classmethod
     def error(cls, reason: str) -> "Verdict":
         """Return an error verdict when the analysis engine fails."""
         short = reason.strip()[:80] if reason.strip() else "Analysis engine error"
