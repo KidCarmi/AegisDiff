@@ -12,6 +12,8 @@ The HTML marker <!-- aegisdiff-report --> is used for idempotent upsert.
 
 from __future__ import annotations
 
+from typing import Optional
+
 from ..triage.verdicts import Severity, Verdict, VerdictType
 
 # HTML marker used to find and update the comment on subsequent pushes
@@ -39,6 +41,7 @@ def format_summary_comment(
     pr_number: int,
     sha: str,
     inline_posted: bool = False,
+    total_findings: Optional[int] = None,
 ) -> str:
     """
     Top-level PR comment: verdict table + summary.
@@ -46,7 +49,11 @@ def format_summary_comment(
     When `inline_posted=True` the evidence/remediation are omitted here
     (they live in the inline comment). When False (fallback), the full
     detail is included so nothing is lost.
+
+    `total_findings` — when >1, adds a note about the total number of
+    true positive findings across all chunks (chunked analysis mode).
     """
+
     sev_icon = SEVERITY_EMOJI.get(verdict.severity, "")
     vrd_icon = VERDICT_EMOJI.get(verdict.verdict, "")
     confidence_pct = f"{verdict.confidence * 100:.0f}%"
@@ -84,6 +91,13 @@ def format_summary_comment(
         )
         detail_section = f"{attack_section}{remediation_section}{fp_section}{evidence_block}"
 
+    findings_note = (
+        f"\n> ⚠️ **{total_findings} true positive findings** across this PR "
+        f"(showing highest severity). Inline comments mark each vulnerable line.\n"
+        if total_findings and total_findings > 1
+        else ""
+    )
+
     return f"""{COMMENT_MARKER}
 ## {vrd_icon} AegisDiff Security Triage — `{verdict.verdict.value}`
 
@@ -99,7 +113,7 @@ def format_summary_comment(
 **{verdict.title}**
 
 {verdict.summary}
-{inline_note}{detail_section}
+{findings_note}{inline_note}{detail_section}
 <sub>Commit `{sha}` · PR #{pr_number} · Powered by [AegisDiff](https://github.com/KidCarmi/AegisDiff)</sub>
 """
 

@@ -96,11 +96,9 @@ def _get_oidc_token() -> str | None:
         return None
 
 
-def _send_to_ingest(
-    ingest_url: str, auth_token: str, verdict, pr_number, commit_sha, repo, scan_ms: int
-) -> None:
-    """POST scan metadata (no code) to the AegisDiff dashboard ingest endpoint."""
-    payload = {
+def _build_ingest_item(verdict, pr_number, commit_sha, repo, scan_ms: int) -> dict:
+    """Build a single ingest metadata dict for one Verdict."""
+    return {
         "verdict": verdict.verdict.value,
         "severity": verdict.severity.value,
         "cwe_id": verdict.cwe_id,
@@ -112,11 +110,42 @@ def _send_to_ingest(
         "pr_url": f"https://github.com/{repo}/pull/{pr_number}" if pr_number else None,
         "scan_ms": scan_ms,
     }
+
+
+def _send_to_ingest(
+    ingest_url: str,
+    auth_token: str,
+    verdicts,
+    pr_number,
+    commit_sha,
+    repo,
+    scan_ms: int,
+) -> None:
+    """
+    POST scan metadata (no code) to the AegisDiff dashboard ingest endpoint.
+
+    Accepts either a single Verdict or a list. When a list is supplied, sends
+    an array payload so the dashboard can store one row per finding per PR.
+    """
+    from .triage.verdicts import Verdict as _Verdict
+
+    if isinstance(verdicts, _Verdict):
+        payload = _build_ingest_item(verdicts, pr_number, commit_sha, repo, scan_ms)
+    else:
+        payload = [
+            _build_ingest_item(v, pr_number, commit_sha, repo, scan_ms) for v in verdicts
+        ]
+
     headers = {"Authorization": f"Bearer {auth_token}", "Content-Type": "application/json"}
     try:
         resp = httpx.post(ingest_url, json=payload, headers=headers, timeout=10.0)
         resp.raise_for_status()
-        logger.info("Scan metadata sent to ingest endpoint (HTTP %d)", resp.status_code)
+        count = len(payload) if isinstance(payload, list) else 1
+        logger.info(
+            "Scan metadata sent to ingest endpoint (%d finding(s), HTTP %d)",
+            count,
+            resp.status_code,
+        )
     except Exception as e:
         logger.warning("Failed to send to ingest endpoint (non-fatal): %s", e)
 
@@ -137,6 +166,8 @@ def main() -> None:
     from .llm.providers.groq import GroqProvider
     from .triage.engine import TriageEngine
     from .triage.verdicts import VerdictType
+
+    CHUNKED_DIFF_THRESHOLD = 100  # lines
 
     cfg = load_config()
 
@@ -189,39 +220,57 @@ def main() -> None:
         sys.exit(0)
 
     t0 = time.monotonic()
-    verdict = engine.analyze_diff(raw_diff)
-    scan_ms = int((time.monotonic() - t0) * 1000)
+    diff_lines = raw_diff.count("\n")
 
+    if diff_lines > CHUNKED_DIFF_THRESHOLD:
+        logger.info("Large diff (%d lines) — using per-file chunked analysis", diff_lines)
+        all_verdicts = engine.analyze_diff_chunked(raw_diff)
+        verdict = TriageEngine.aggregate_verdicts(all_verdicts)
+        logger.info(
+            "Aggregated %d chunk(s) → primary: %s [%s]",
+            len(all_verdicts),
+            verdict.verdict.value,
+            verdict.severity.value,
+        )
+    else:
+        verdict = engine.analyze_diff(raw_diff)
+        all_verdicts = [verdict]
+
+    scan_ms = int((time.monotonic() - t0) * 1000)
     sha_short = cfg.commit_sha[:7]
 
     # Post to PR + commit status (if we have the needed context)
     if cfg.pr_number and cfg.github_token and cfg.repo:
         client = GitHubClient(cfg.github_token, cfg.repo)
 
-        # ── Inline review comment (Phase 2) ─────────────────────────────
-        # When the AST extractor resolved a sink line, post the evidence
-        # and remediation as an inline comment on that exact line.
-        # Falls back to embedding the detail in the top-level comment if
-        # the line is not part of this diff (GitHub returns 422).
-        inline_posted = False
-        if verdict.line_number and verdict.file_path:
-            inline_body = format_inline_comment(verdict)
-            inline_posted = client.create_review(
-                cfg.pr_number,
-                cfg.commit_sha,
-                verdict.file_path,
-                verdict.line_number,
-                inline_body,
-            )
+        # ── Inline review comments ───────────────────────────────────────
+        # Post an inline comment for every finding with a known sink line.
+        # In chunked mode this can produce multiple inline comments (one per
+        # vulnerable file). In single-verdict mode at most one is posted.
+        any_inline_posted = False
+        for v in all_verdicts:
+            if v.line_number and v.file_path:
+                inline_body = format_inline_comment(v)
+                posted = client.create_review(
+                    cfg.pr_number,
+                    cfg.commit_sha,
+                    v.file_path,
+                    v.line_number,
+                    inline_body,
+                )
+                if posted and v is verdict:
+                    any_inline_posted = True
 
         # ── Top-level summary comment ────────────────────────────────────
-        # Always posted. When inline succeeded, omits evidence (it's inline).
-        # When inline failed/unavailable, includes full evidence as fallback.
+        # Always posted. Based on the primary (most severe) verdict.
+        # When inline succeeded for the primary finding, omits evidence.
+        extra_count = len([v for v in all_verdicts if v.verdict == VerdictType.TRUE_POSITIVE])
         comment_body = format_summary_comment(
             verdict,
             pr_number=cfg.pr_number,
             sha=sha_short,
-            inline_posted=inline_posted,
+            inline_posted=any_inline_posted,
+            total_findings=extra_count if extra_count > 1 else None,
         )
         client.upsert_pr_comment(cfg.pr_number, comment_body, COMMENT_MARKER)
 
@@ -247,10 +296,12 @@ def main() -> None:
     else:
         auth_token = _get_oidc_token() or cfg.aegisdiff_repo_token
         if auth_token:
+            # Send all findings as an array (one DB row per finding per PR)
+            ingest_payload = all_verdicts if len(all_verdicts) > 1 else verdict
             _send_to_ingest(
                 cfg.aegisdiff_ingest_url,
                 auth_token,
-                verdict,
+                ingest_payload,
                 cfg.pr_number,
                 cfg.commit_sha,
                 cfg.repo,
@@ -266,11 +317,18 @@ def main() -> None:
     # Print to GitHub Actions step summary
     try:
         step_summary = Path("/tmp/step_summary.md")
-        step_summary.write_text(
-            f"## AegisDiff — {verdict.verdict.value}\n\n"
+        tp_count = sum(1 for v in all_verdicts if v.verdict == VerdictType.TRUE_POSITIVE)
+        summary_lines = [
+            f"## AegisDiff — {verdict.verdict.value}",
+            "",
             f"**{verdict.title}** (confidence: {verdict.confidence:.0%}, "
-            f"provider: {verdict.provider})\n"
-        )
+            f"provider: {verdict.provider})",
+        ]
+        if len(all_verdicts) > 1:
+            summary_lines.append(
+                f"\n_{len(all_verdicts)} file(s) analyzed, {tp_count} true positive(s)_"
+            )
+        step_summary.write_text("\n".join(summary_lines) + "\n")
         logger.info("Step summary written")
     except OSError:
         pass

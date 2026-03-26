@@ -3,16 +3,34 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from pathlib import Path
+from typing import List, Tuple
 
 from ..code_context.extractor import CodeContextExtractor
 from ..llm.orchestrator import LLMOrchestrator
 from ..llm.providers.base import LLMRequest
 from .prompts import APPSEC_SYSTEM_PROMPT, build_user_message
-from .verdicts import Verdict, parse_verdict
+from .verdicts import Severity, Verdict, VerdictType, parse_verdict
 
 logger = logging.getLogger(__name__)
+
+# Verdict/severity rank used for aggregation (higher = worse / more actionable)
+_VERDICT_RANK = {
+    VerdictType.TRUE_POSITIVE: 3,
+    VerdictType.NEEDS_REVIEW: 2,
+    VerdictType.ERROR: 1,
+    VerdictType.FALSE_POSITIVE: 0,
+}
+_SEVERITY_RANK = {
+    Severity.CRITICAL: 5,
+    Severity.HIGH: 4,
+    Severity.MEDIUM: 3,
+    Severity.LOW: 2,
+    Severity.INFO: 1,
+    Severity.NA: 0,
+}
 
 
 class TriageEngine:
@@ -94,3 +112,84 @@ class TriageEngine:
         except Exception as e:
             logger.exception("Unexpected error in triage engine")
             return Verdict.error(f"Unexpected error: {e}")
+
+    def analyze_diff_chunked(self, raw_diff: str) -> List[Verdict]:
+        """
+        Analyze each changed file independently and return one Verdict per file.
+
+        Use this for large diffs (>100 lines) to avoid context-window pressure
+        and to get per-file findings with accurate line numbers.
+
+        Returns a non-empty list — at minimum [Verdict.no_op()] for empty diffs.
+        The caller should use aggregate_verdicts() to select the primary result.
+        """
+        chunks = self._split_diff_by_file(raw_diff)
+        if not chunks:
+            logger.info("No per-file chunks found — falling back to whole-diff analysis")
+            return [self.analyze_diff(raw_diff)]
+
+        verdicts: List[Verdict] = []
+        for file_path, chunk in chunks:
+            logger.info("Analyzing chunk: %s (%d lines)", file_path, chunk.count("\n"))
+            verdict = self.analyze_diff(chunk)
+            verdicts.append(verdict)
+
+        # Drop no-op FALSE_POSITIVEs when more actionable findings exist
+        actionable = [v for v in verdicts if v.verdict != VerdictType.FALSE_POSITIVE]
+        if actionable:
+            logger.info(
+                "Chunked analysis: %d file(s), %d actionable finding(s)",
+                len(chunks),
+                len(actionable),
+            )
+            return verdicts  # Return all so caller can decide what to ingest
+
+        return verdicts
+
+    @staticmethod
+    def aggregate_verdicts(verdicts: List[Verdict]) -> Verdict:
+        """
+        Select the primary verdict from a chunked analysis.
+
+        Ranks by: verdict type (TRUE_POSITIVE > NEEDS_REVIEW > ERROR > FALSE_POSITIVE),
+        then severity (CRITICAL → NA), then confidence.
+        """
+        if not verdicts:
+            return Verdict.no_op()
+
+        def _rank(v: Verdict) -> Tuple[int, int, float]:
+            return (
+                _VERDICT_RANK.get(v.verdict, 0),
+                _SEVERITY_RANK.get(v.severity, 0),
+                v.confidence,
+            )
+
+        return max(verdicts, key=_rank)
+
+    @staticmethod
+    def _split_diff_by_file(raw_diff: str) -> List[Tuple[str, str]]:
+        """
+        Split a unified diff into per-file chunks.
+
+        Each chunk starts with the `diff --git` header and contains all hunks
+        for that file. Returns a list of (file_path, chunk_text) tuples.
+        """
+        chunks: List[Tuple[str, str]] = []
+        current_file: str | None = None
+        current_lines: List[str] = []
+
+        for line in raw_diff.splitlines(keepends=True):
+            if line.startswith("diff --git "):
+                if current_file is not None and current_lines:
+                    chunks.append((current_file, "".join(current_lines)))
+                # Extract the b/ path: "diff --git a/foo/bar.py b/foo/bar.py"
+                m = re.search(r" b/(.+)$", line.rstrip())
+                current_file = m.group(1) if m else line.split()[-1].lstrip("b/")
+                current_lines = [line]
+            elif current_file is not None:
+                current_lines.append(line)
+
+        if current_file is not None and current_lines:
+            chunks.append((current_file, "".join(current_lines)))
+
+        return chunks

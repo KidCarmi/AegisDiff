@@ -206,21 +206,27 @@ export async function POST(req: NextRequest) {
     repoId = (rows[0] as any).id;
   }
 
-  // Parse & validate
-  let payload: IngestPayload;
-  try { payload = await req.json(); }
-  catch { return NextResponse.json({ error: "Invalid JSON" }, { status: 400 }); }
+  // Parse & validate — accept a single payload or an array (chunked analysis)
+  let payloads: IngestPayload[];
+  try {
+    const raw = await req.json();
+    payloads = Array.isArray(raw) ? raw : [raw];
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
 
-  if (!ALLOWED_VERDICTS.has(payload.verdict))
-    return NextResponse.json({ error: "Invalid verdict" }, { status: 400 });
-  if (!payload.commit_sha || typeof payload.commit_sha !== "string")
-    return NextResponse.json({ error: "Missing commit_sha" }, { status: 400 });
+  if (payloads.length === 0)
+    return NextResponse.json({ error: "Empty payload array" }, { status: 400 });
 
-  const confidence = typeof payload.confidence === "number" && isFinite(payload.confidence)
-    ? Math.max(0, Math.min(1, payload.confidence)) : null;
-  const title = payload.title?.slice(0, 80) ?? null;
+  // Validate each item
+  for (const p of payloads) {
+    if (!ALLOWED_VERDICTS.has(p.verdict))
+      return NextResponse.json({ error: "Invalid verdict" }, { status: 400 });
+    if (!p.commit_sha || typeof p.commit_sha !== "string")
+      return NextResponse.json({ error: "Missing commit_sha" }, { status: 400 });
+  }
 
-  // Fetch repo config (all webhook URLs + thresholds)
+  // Fetch repo config once (same for all findings in this batch)
   const repoMeta = await sql`
     SELECT owner, name, installation_id,
            slack_webhook_url, discord_webhook_url, teams_webhook_url,
@@ -230,43 +236,55 @@ export async function POST(req: NextRequest) {
     FROM repos WHERE id = ${repoId} LIMIT 1`;
   const meta = repoMeta[0] as any ?? {};
 
-  // Insert scan
-  await sql`
-    INSERT INTO scans (repo_id, pr_number, commit_sha, pr_url, verdict, severity, cwe_id, confidence, title, provider, scan_ms)
-    VALUES (${repoId}, ${payload.pr_number ?? null}, ${payload.commit_sha.slice(0, 40)},
-            ${payload.pr_url ?? null}, ${payload.verdict}, ${payload.severity ?? null},
-            ${payload.cwe_id ?? null}, ${confidence}, ${title},
-            ${payload.provider ?? null}, ${payload.scan_ms ?? null})`;
+  // Insert one scan row per finding
+  for (const payload of payloads) {
+    const confidence = typeof payload.confidence === "number" && isFinite(payload.confidence)
+      ? Math.max(0, Math.min(1, payload.confidence)) : null;
+    const title = payload.title?.slice(0, 80) ?? null;
 
-  // Log to audit
+    await sql`
+      INSERT INTO scans (repo_id, pr_number, commit_sha, pr_url, verdict, severity, cwe_id, confidence, title, provider, scan_ms)
+      VALUES (${repoId}, ${payload.pr_number ?? null}, ${payload.commit_sha.slice(0, 40)},
+              ${payload.pr_url ?? null}, ${payload.verdict}, ${payload.severity ?? null},
+              ${payload.cwe_id ?? null}, ${confidence}, ${title},
+              ${payload.provider ?? null}, ${payload.scan_ms ?? null})`;
+  }
+
+  // Audit log — one entry summarising the batch
   try {
     const githubIdRows = await sql`SELECT u.github_id FROM users u JOIN repos r ON r.user_id = u.id WHERE r.id = ${repoId} LIMIT 1`;
     if (githubIdRows.length > 0) {
+      const primary = payloads.reduce((best, p) =>
+        (SEVERITY_RANK[p.severity ?? "N/A"] ?? -1) > (SEVERITY_RANK[best.severity ?? "N/A"] ?? -1) ? p : best
+      );
       await sql`INSERT INTO audit_log (github_id, action, repo_owner, repo_name, details)
         VALUES (${(githubIdRows[0] as any).github_id}, 'scan_ingested', ${meta.owner}, ${meta.name},
-                ${JSON.stringify({ verdict: payload.verdict, severity: payload.severity, cwe_id: payload.cwe_id })})`;
+                ${JSON.stringify({ count: payloads.length, verdict: primary.verdict, severity: primary.severity, cwe_id: primary.cwe_id })})`;
     }
   } catch { /* audit failure is non-fatal */ }
 
-  // Determine if webhooks should fire
-  const notify = shouldNotify(payload.verdict, payload.severity ?? null, meta.notify_min_severity, meta.notify_on_needs_review);
+  // Webhooks — fire once for the most severe actionable finding in the batch
+  const notifiable = payloads
+    .filter((p) => shouldNotify(p.verdict, p.severity ?? null, meta.notify_min_severity, meta.notify_on_needs_review))
+    .sort((a, b) => (SEVERITY_RANK[b.severity ?? "N/A"] ?? -1) - (SEVERITY_RANK[a.severity ?? "N/A"] ?? -1));
 
-  if (notify) {
+  if (notifiable.length > 0) {
+    const primary = notifiable[0];
     const owner = meta.owner as string;
     const name = meta.name as string;
 
     if (meta.slack_webhook_url)
-      fireWebhook(meta.slack_webhook_url, buildSlackPayload(owner, name, payload), "Slack");
+      fireWebhook(meta.slack_webhook_url, buildSlackPayload(owner, name, primary), "Slack");
     if (meta.discord_webhook_url)
-      fireWebhook(meta.discord_webhook_url, buildDiscordPayload(owner, name, payload), "Discord");
+      fireWebhook(meta.discord_webhook_url, buildDiscordPayload(owner, name, primary), "Discord");
     if (meta.teams_webhook_url)
-      fireWebhook(meta.teams_webhook_url, buildTeamsPayload(owner, name, payload), "Teams");
+      fireWebhook(meta.teams_webhook_url, buildTeamsPayload(owner, name, primary), "Teams");
 
     // GitHub Issues — only on TRUE_POSITIVE, only if GitHub App installed
-    if (payload.verdict === "TRUE_POSITIVE" && meta.auto_github_issue && meta.installation_id) {
-      createGitHubIssue(meta.installation_id, owner, name, payload);
+    if (primary.verdict === "TRUE_POSITIVE" && meta.auto_github_issue && meta.installation_id) {
+      createGitHubIssue(meta.installation_id, owner, name, primary);
     }
   }
 
-  return NextResponse.json({ ok: true }, { status: 201 });
+  return NextResponse.json({ ok: true, count: payloads.length }, { status: 201 });
 }
