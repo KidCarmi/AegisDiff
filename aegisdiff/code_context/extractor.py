@@ -185,12 +185,23 @@ SAFE_JS_PATTERNS = re.compile(
 )
 
 JS_SANITIZER_KEYWORDS = [
-    "domPurify", "dompurify", "sanitizeHtml", "sanitize_html",
-    "encodeURIComponent", "encodeURI", "escape",
-    "validator.escape", "xss(", "sanitize(",
-    "htmlspecialchars", "entities.encode",
-    "prepared", "parameterized", "placeholder",
-    "bcrypt", "crypto.createHash",
+    "domPurify",
+    "dompurify",
+    "sanitizeHtml",
+    "sanitize_html",
+    "encodeURIComponent",
+    "encodeURI",
+    "escape",
+    "validator.escape",
+    "xss(",
+    "sanitize(",
+    "htmlspecialchars",
+    "entities.encode",
+    "prepared",
+    "parameterized",
+    "placeholder",
+    "bcrypt",
+    "crypto.createHash",
 ]
 
 # ── Go patterns ────────────────────────────────────────────────────────────
@@ -296,13 +307,18 @@ SAFE_JAVA_PATTERNS = re.compile(
 # ── File extension → language mapping ─────────────────────────────────────
 
 _EXT_TO_LANG: Dict[str, str] = {
-    ".py": "python", ".pyw": "python",
-    ".js": "javascript", ".mjs": "javascript", ".cjs": "javascript",
-    ".ts": "typescript", ".tsx": "typescript", ".jsx": "javascript",
+    ".py": "python",
+    ".pyw": "python",
+    ".js": "javascript",
+    ".mjs": "javascript",
+    ".cjs": "javascript",
+    ".ts": "typescript",
+    ".tsx": "typescript",
+    ".jsx": "javascript",
     ".go": "go",
     ".java": "java",
-    ".rb": "ruby",   # uses Python patterns as closest match
-    ".php": "php",   # uses Python patterns as closest match
+    ".rb": "ruby",  # uses Python patterns as closest match
+    ".php": "php",  # uses Python patterns as closest match
 }
 
 
@@ -442,9 +458,7 @@ class CodeContextExtractor:
                 )
         return paths
 
-    def _get_lang_patterns(
-        self, file_path: str
-    ) -> tuple:
+    def _get_lang_patterns(self, file_path: str) -> tuple:
         """
         Return (sink_patterns, source_patterns, safe_pattern, extra_sanitizers)
         appropriate for the given file extension.
