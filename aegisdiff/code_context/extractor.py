@@ -31,13 +31,12 @@ from .models import (
 
 logger = logging.getLogger(__name__)
 
-# Matches: # aegisdiff-ignore[: CWE-NNN] [reason: ...]
-# CWE and reason are both optional.  Examples:
-#   # aegisdiff-ignore
-#   # aegisdiff-ignore: CWE-89
-#   # aegisdiff-ignore: CWE-89 reason: test fixture only
+# Matches aegisdiff-ignore in any comment style:
+#   Python/Ruby/Shell:  # aegisdiff-ignore: CWE-89 reason: test only
+#   JS/TS/Go/Java/C:   // aegisdiff-ignore: CWE-89 reason: test only
+# CWE and reason are both optional.
 _IGNORE_RE = re.compile(
-    r"#\s*aegisdiff-ignore"
+    r"(?:#|//)\s*aegisdiff-ignore"
     r"(?:\s*:\s*(?P<cwe>CWE-\d+))?"
     r"(?:\s+reason\s*:\s*(?P<reason>.+?))?$",
     re.IGNORECASE,
@@ -103,6 +102,208 @@ SAFE_ORM_PATTERNS = re.compile(
     r"|annotate|aggregate|order_by|values_list)\s*\(",
     re.IGNORECASE,
 )
+
+# ── JavaScript / TypeScript patterns ───────────────────────────────────────
+
+JS_TS_SINK_PATTERNS: Dict[str, re.Pattern] = {
+    # SQL — raw query methods (parameterized equivalents are safe)
+    "sql_exec": re.compile(
+        r"\b(db|pool|client|connection|knex|sequelize)\s*\.\s*(query|execute|raw)\s*\(",
+        re.IGNORECASE,
+    ),
+    # OS command execution
+    "cmd_exec": re.compile(
+        r"\b(exec|execSync|execFile|execFileSync|spawn|spawnSync)\s*\("
+        r"|child_process\.(exec|spawn)\s*\(",
+        re.IGNORECASE,
+    ),
+    # XSS sinks
+    "xss": re.compile(
+        r"\.(innerHTML|outerHTML)\s*="
+        r"|dangerouslySetInnerHTML"
+        r"|\bdocument\.write\s*\("
+        r"|\$\(.*\)\.(html|append|prepend|after|before|replaceWith)\s*\(",
+        re.IGNORECASE,
+    ),
+    # eval / dynamic code execution
+    "eval_exec": re.compile(
+        r"\beval\s*\("
+        r"|new\s+Function\s*\("
+        r"|\bvm\.(runInNewContext|runInThisContext|Script)\s*\(",
+        re.IGNORECASE,
+    ),
+    # SSRF — outbound HTTP with user-controlled URL
+    "ssrf": re.compile(
+        r"\b(fetch|axios\.get|axios\.post|axios\.request|axios\.put|axios\.delete"
+        r"|http\.get|http\.request|https\.get|https\.request|got|superagent|request)\s*\(",
+        re.IGNORECASE,
+    ),
+    # Path traversal / file operations
+    "file_ops": re.compile(
+        r"\b(fs\.readFile|fs\.readFileSync|fs\.writeFile|fs\.writeFileSync"
+        r"|fs\.open|fs\.unlink|fs\.rename|readFileSync|writeFileSync)\s*\(",
+        re.IGNORECASE,
+    ),
+    # Template injection
+    "template_render": re.compile(
+        r"\b(ejs\.render|ejs\.renderFile|Handlebars\.compile|nunjucks\.render"
+        r"|pug\.render|_.template|jade\.render)\s*\(",
+        re.IGNORECASE,
+    ),
+    # Open redirect
+    "redirect": re.compile(
+        r"\bres\.(redirect|location)\s*\(",
+        re.IGNORECASE,
+    ),
+}
+
+JS_TS_SOURCE_PATTERNS: Dict[str, re.Pattern] = {
+    "req_param": re.compile(
+        r"\b(req|request)\s*\.\s*(body|query|params|cookies|headers"
+        r"|files|file|fields|param|get|post)\b",
+        re.IGNORECASE,
+    ),
+    "url_param": re.compile(
+        r"\b(new URLSearchParams|location\.search|location\.hash"
+        r"|window\.location|document\.location|searchParams\.get)\b",
+        re.IGNORECASE,
+    ),
+    "env_var": re.compile(r"\bprocess\.env\b", re.IGNORECASE),
+    "event_input": re.compile(
+        r"\bevent\.(target|currentTarget)\.(value|checked|innerHTML)\b"
+        r"|\bdocument\.(getElementById|querySelector)\s*\([^)]+\)\.(value|innerHTML)\b",
+        re.IGNORECASE,
+    ),
+}
+
+# Prisma / Sequelize / Mongoose / TypeORM methods are parameterized by default
+SAFE_JS_PATTERNS = re.compile(
+    r"\b(prisma|db)\s*\.\s*\w+\s*\.\s*(findMany|findFirst|findUnique|findOne|create|update|upsert|delete|count)\s*\("
+    r"|\.(findAll|findOne|findByPk|findById|findOneAndUpdate|countDocuments|aggregate)\s*\("
+    r"|\b(res\.json|res\.send|res\.status|next)\s*\(",
+    re.IGNORECASE,
+)
+
+JS_SANITIZER_KEYWORDS = [
+    "domPurify", "dompurify", "sanitizeHtml", "sanitize_html",
+    "encodeURIComponent", "encodeURI", "escape",
+    "validator.escape", "xss(", "sanitize(",
+    "htmlspecialchars", "entities.encode",
+    "prepared", "parameterized", "placeholder",
+    "bcrypt", "crypto.createHash",
+]
+
+# ── Go patterns ────────────────────────────────────────────────────────────
+
+GO_SINK_PATTERNS: Dict[str, re.Pattern] = {
+    # Require db/conn/tx receiver to avoid false-positives on url.Query()
+    "sql_exec": re.compile(
+        r"\b(db|conn|tx|stmt|sqlDB|sqlConn)\.(Query|QueryRow|QueryContext|Exec|ExecContext|Prepare)\s*\(",
+        re.IGNORECASE,
+    ),
+    "cmd_exec": re.compile(
+        r"\bexec\.Command\s*\(",
+        re.IGNORECASE,
+    ),
+    "ssrf": re.compile(
+        r"\bhttp\.(Get|Post|Head|Do|NewRequest)\s*\(",
+        re.IGNORECASE,
+    ),
+    "file_ops": re.compile(
+        r"\b(os\.(Open|Create|OpenFile|Remove|Rename)|ioutil\.ReadFile|ioutil\.WriteFile"
+        r"|os\.ReadFile|os\.WriteFile)\s*\(",
+        re.IGNORECASE,
+    ),
+    "xss": re.compile(
+        r"\btemplate\.HTML\s*\("
+        r"|\bfmt\.(Fprintf|Fprint|Fprintln)\s*\(.*ResponseWriter",
+        re.IGNORECASE,
+    ),
+    "fmt_sprintf_sql": re.compile(
+        r'\bfmt\.Sprintf\s*\(\s*"[^"]*(?:SELECT|INSERT|UPDATE|DELETE|WHERE)',
+        re.IGNORECASE,
+    ),
+}
+
+GO_SOURCE_PATTERNS: Dict[str, re.Pattern] = {
+    "http_param": re.compile(
+        r"\b(r\.URL\.Query\(\)|r\.FormValue|r\.PostFormValue"
+        r"|r\.Header\.Get|r\.Body"
+        r"|c\.Param|c\.Query|c\.PostForm"  # Gin
+        r"|chi\.URLParam)\s*\(?",
+        re.IGNORECASE,
+    ),
+    "env_var": re.compile(r"\bos\.Getenv\s*\(", re.IGNORECASE),
+}
+
+SAFE_GO_PATTERNS = re.compile(
+    r"\bdb\.Prepare\s*\(|sqlx\.NamedQuery|squirrel\.",
+    re.IGNORECASE,
+)
+
+# ── Java patterns ──────────────────────────────────────────────────────────
+
+JAVA_SINK_PATTERNS: Dict[str, re.Pattern] = {
+    "sql_exec": re.compile(
+        r"\.(executeQuery|executeUpdate|execute|addBatch)\s*\("
+        r"|\bcreateQuery\s*\(",
+        re.IGNORECASE,
+    ),
+    "cmd_exec": re.compile(
+        r"\bRuntime\.getRuntime\(\)\.exec\s*\("
+        r"|\bnew\s+ProcessBuilder\s*\(",
+        re.IGNORECASE,
+    ),
+    "deserialize": re.compile(
+        r"\bnew\s+ObjectInputStream\s*\("
+        r"|\bXMLDecoder\s*\("
+        r"|\bYaml\.load\s*\(",
+        re.IGNORECASE,
+    ),
+    "xss": re.compile(
+        r"response\.(getWriter|getOutputStream)\(\)\.(write|print|println)\s*\(",
+        re.IGNORECASE,
+    ),
+    "redirect": re.compile(
+        r"response\.sendRedirect\s*\(",
+        re.IGNORECASE,
+    ),
+    "xxe": re.compile(
+        r"\bDocumentBuilderFactory\.newInstance\s*\("
+        r"|\bSAXParserFactory\.newInstance\s*\(",
+        re.IGNORECASE,
+    ),
+}
+
+JAVA_SOURCE_PATTERNS: Dict[str, re.Pattern] = {
+    "request_param": re.compile(
+        r"\brequest\.(getParameter|getAttribute|getHeader|getQueryString"
+        r"|getCookies|getInputStream|getReader)\s*\(",
+        re.IGNORECASE,
+    ),
+    "annotation_param": re.compile(
+        r"@\s*(RequestParam|PathVariable|RequestBody|RequestHeader|CookieValue)\b",
+        re.IGNORECASE,
+    ),
+}
+
+SAFE_JAVA_PATTERNS = re.compile(
+    r"\bPreparedStatement\b|\bparameterized\b|\bNamedParameterJdbcTemplate\b"
+    r"|\bHibernate\b|\bEntityManager\.createQuery\b",
+    re.IGNORECASE,
+)
+
+# ── File extension → language mapping ─────────────────────────────────────
+
+_EXT_TO_LANG: Dict[str, str] = {
+    ".py": "python", ".pyw": "python",
+    ".js": "javascript", ".mjs": "javascript", ".cjs": "javascript",
+    ".ts": "typescript", ".tsx": "typescript", ".jsx": "javascript",
+    ".go": "go",
+    ".java": "java",
+    ".rb": "ruby",   # uses Python patterns as closest match
+    ".php": "php",   # uses Python patterns as closest match
+}
 
 
 class CodeContextExtractor:
@@ -211,6 +412,7 @@ class CodeContextExtractor:
         if not sinks:
             return []
 
+        _, _, _, extra_sanitizers = self._get_lang_patterns(file_path)
         paths: List[DataFlowPath] = []
         for sink in sinks:
             # Try to find a source that could taint this sink
@@ -225,10 +427,10 @@ class CodeContextExtractor:
             ]
             for src in matching_sources:
                 edges = self._find_assignment_chain(source_code, src, sink, file_path)
-                sanitized = self._check_sanitizers(edges, source_code)
+                sanitized = self._check_sanitizers(edges, source_code, extra_sanitizers)
                 san_desc = None
                 if sanitized:
-                    san_desc = self._describe_sanitizer(edges, source_code)
+                    san_desc = self._describe_sanitizer(edges, source_code, extra_sanitizers)
                 paths.append(
                     DataFlowPath(
                         source=src,
@@ -240,9 +442,34 @@ class CodeContextExtractor:
                 )
         return paths
 
+    def _get_lang_patterns(
+        self, file_path: str
+    ) -> tuple:
+        """
+        Return (sink_patterns, source_patterns, safe_pattern, extra_sanitizers)
+        appropriate for the given file extension.
+        """
+        ext = Path(file_path).suffix.lower()
+        lang = _EXT_TO_LANG.get(ext, "python")
+
+        if lang in ("javascript", "typescript"):
+            return (
+                JS_TS_SINK_PATTERNS,
+                JS_TS_SOURCE_PATTERNS,
+                SAFE_JS_PATTERNS,
+                JS_SANITIZER_KEYWORDS,
+            )
+        if lang == "go":
+            return (GO_SINK_PATTERNS, GO_SOURCE_PATTERNS, SAFE_GO_PATTERNS, [])
+        if lang == "java":
+            return (JAVA_SINK_PATTERNS, JAVA_SOURCE_PATTERNS, SAFE_JAVA_PATTERNS, [])
+        # Default: Python (also used for Ruby, PHP as best approximation)
+        return (PYTHON_SINK_PATTERNS, PYTHON_SOURCE_PATTERNS, SAFE_ORM_PATTERNS, [])
+
     def _find_sinks(
         self, source_code: str, changed_line_set: Set[int], file_path: str
     ) -> List[Sink]:
+        sink_patterns, _, safe_pattern, _ = self._get_lang_patterns(file_path)
         lines = source_code.splitlines()
         sinks: List[Sink] = []
         for ln_idx, line in enumerate(lines):
@@ -250,9 +477,9 @@ class CodeContextExtractor:
             if ln not in changed_line_set:
                 continue
             # Skip ORM/framework safe patterns immediately
-            if SAFE_ORM_PATTERNS.search(line):
+            if safe_pattern.search(line):
                 continue
-            for category, pattern in PYTHON_SINK_PATTERNS.items():
+            for category, pattern in sink_patterns.items():
                 if pattern.search(line):
                     m = pattern.search(line)
                     func_name = m.group(0).rstrip("(").strip() if m else "<unknown>"
@@ -297,6 +524,7 @@ class CodeContextExtractor:
     def _find_sources(
         self, source_code: str, changed_line_set: Set[int], file_path: str
     ) -> List[Source]:
+        _, source_patterns, _, _ = self._get_lang_patterns(file_path)
         lines = source_code.splitlines()
         sources: List[Source] = []
         # Search a wider window: ±50 lines around changed lines
@@ -309,7 +537,7 @@ class CodeContextExtractor:
             ln = ln_idx + 1
             if ln not in search_lines:
                 continue
-            for category, pattern in PYTHON_SOURCE_PATTERNS.items():
+            for category, pattern in source_patterns.items():
                 if pattern.search(line):
                     # Extract the variable being assigned from this source
                     var_name = self._extract_assigned_var(line)
@@ -361,20 +589,26 @@ class CodeContextExtractor:
                 )
         return edges
 
-    def _check_sanitizers(self, edges: List[DataFlowEdge], source_code: str) -> bool:
+    def _check_sanitizers(
+        self, edges: List[DataFlowEdge], source_code: str, extra_keywords: Optional[List[str]] = None
+    ) -> bool:
         """Return True if any edge passes through a known sanitizer."""
+        keywords = SANITIZER_KEYWORDS + (extra_keywords or [])
         for edge in edges:
             combined = (edge.from_var + " " + edge.to_var).lower()
-            for kw in SANITIZER_KEYWORDS:
-                if kw in combined:
+            for kw in keywords:
+                if kw.lower() in combined:
                     return True
         return False
 
-    def _describe_sanitizer(self, edges: List[DataFlowEdge], source_code: str) -> str:
+    def _describe_sanitizer(
+        self, edges: List[DataFlowEdge], source_code: str, extra_keywords: Optional[List[str]] = None
+    ) -> str:
+        keywords = SANITIZER_KEYWORDS + (extra_keywords or [])
         for edge in edges:
             combined = (edge.from_var + " " + edge.to_var).lower()
-            for kw in SANITIZER_KEYWORDS:
-                if kw in combined:
+            for kw in keywords:
+                if kw.lower() in combined:
                     return f"Found '{kw}' in assignment chain at line {edge.line_number}"
         return "Sanitizer detected"
 

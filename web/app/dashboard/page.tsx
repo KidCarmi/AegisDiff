@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { authOptions } from "../../lib/auth";
 import { sql } from "../../lib/db";
 import { TrendChart } from "../../components/TrendChart";
-import { ScanList } from "../../components/ScanList";
+import { DashboardTabs } from "../../components/DashboardTabs";
 import type { Scan } from "../../lib/types";
 
 async function getRecentScans(githubId: number, username: string): Promise<Scan[]> {
@@ -232,13 +232,8 @@ export default async function DashboardPage() {
         </div>
       )}
 
-      {/* Scan list */}
-      <div>
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100">Recent Scans</h2>
-        </div>
-        <ScanList scans={scans} canFeedback={true} />
-      </div>
+      {/* Scan list + Top Vulns tabs */}
+      <DashboardTabs scans={scans} canFeedback={true} />
     </div>
   );
 }

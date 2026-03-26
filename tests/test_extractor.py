@@ -206,3 +206,173 @@ class TestIgnoreSuppression:
         assert len(suppressed_sinks) >= 1
         assert suppressed_sinks[0].ignore_cwe == "CWE-89"
         assert suppressed_sinks[0].ignore_reason == "parameterized in prod"
+
+
+class TestJSTSSinkDetection:
+    """JavaScript/TypeScript sink and source pattern coverage."""
+
+    def _ext(self, tmp_path):
+        return CodeContextExtractor(tmp_path)
+
+    # ── Sinks ────────────────────────────────────────────────────────────
+
+    def test_detects_db_query_sink(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = 'const rows = await db.query(`SELECT * FROM users WHERE id=${userId}`)'
+        sinks = ext._find_sinks(code, {1}, "routes/users.ts")
+        assert any(s.sink_category == "sql_exec" for s in sinks)
+
+    def test_detects_exec_sink(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = 'const out = execSync(`ls ${userDir}`)'
+        sinks = ext._find_sinks(code, {1}, "utils.js")
+        assert any(s.sink_category == "cmd_exec" for s in sinks)
+
+    def test_detects_inner_html_xss(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = 'el.innerHTML = req.query.html'
+        sinks = ext._find_sinks(code, {1}, "app.ts")
+        assert any(s.sink_category == "xss" for s in sinks)
+
+    def test_detects_eval_sink(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = 'eval(req.body.code)'
+        sinks = ext._find_sinks(code, {1}, "handler.js")
+        assert any(s.sink_category == "eval_exec" for s in sinks)
+
+    def test_detects_fetch_ssrf(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = 'const resp = await fetch(req.query.url)'
+        sinks = ext._find_sinks(code, {1}, "proxy.ts")
+        assert any(s.sink_category == "ssrf" for s in sinks)
+
+    def test_detects_fs_read_file(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = 'const data = fs.readFileSync(req.params.path)'
+        sinks = ext._find_sinks(code, {1}, "files.js")
+        assert any(s.sink_category == "file_ops" for s in sinks)
+
+    def test_detects_open_redirect(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = 'res.redirect(req.query.next)'
+        sinks = ext._find_sinks(code, {1}, "auth.ts")
+        assert any(s.sink_category == "redirect" for s in sinks)
+
+    # ── Safe patterns (should NOT be flagged) ────────────────────────────
+
+    def test_prisma_find_not_flagged(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = 'const user = await prisma.user.findUnique({ where: { id } })'
+        sinks = ext._find_sinks(code, {1}, "api.ts")
+        assert len(sinks) == 0
+
+    def test_mongoose_find_not_flagged(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = 'const docs = await Model.findOne({ email: email })'
+        sinks = ext._find_sinks(code, {1}, "db.ts")
+        assert len(sinks) == 0
+
+    # ── Sources ──────────────────────────────────────────────────────────
+
+    def test_detects_req_body_source(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = 'const { name } = req.body'
+        sources = ext._find_sources(code, {1}, "handler.js")
+        assert any(s.source_category == "req_param" for s in sources)
+
+    def test_detects_url_search_params(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = 'const id = new URLSearchParams(location.search).get("id")'
+        sources = ext._find_sources(code, {1}, "client.ts")
+        assert any(s.source_category == "url_param" for s in sources)
+
+    # ── aegisdiff-ignore with // syntax ─────────────────────────────────
+
+    def test_js_ignore_comment_slash_slash(self, tmp_path):
+        ext = self._ext(tmp_path)
+        lines = ['// aegisdiff-ignore: CWE-79 reason: sanitized upstream',
+                 'el.innerHTML = value']
+        suppressed, cwe, reason = ext._check_ignore_comment(lines, 1)
+        assert suppressed is True
+        assert cwe == "CWE-79"
+        assert reason == "sanitized upstream"
+
+    def test_js_ignore_inline(self, tmp_path):
+        ext = self._ext(tmp_path)
+        lines = ['el.innerHTML = value  // aegisdiff-ignore']
+        suppressed, cwe, reason = ext._check_ignore_comment(lines, 0)
+        assert suppressed is True
+
+
+class TestGoSinkDetection:
+    """Go sink and source pattern coverage."""
+
+    def _ext(self, tmp_path):
+        return CodeContextExtractor(tmp_path)
+
+    def test_detects_db_query(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = 'rows, err := db.Query("SELECT * FROM users WHERE id = " + id)'
+        sinks = ext._find_sinks(code, {1}, "main.go")
+        assert any(s.sink_category == "sql_exec" for s in sinks)
+
+    def test_detects_exec_command(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = 'cmd := exec.Command("sh", "-c", userInput)'
+        sinks = ext._find_sinks(code, {1}, "runner.go")
+        assert any(s.sink_category == "cmd_exec" for s in sinks)
+
+    def test_detects_fmt_sprintf_sql(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = 'query := fmt.Sprintf("SELECT * FROM users WHERE name=\'%s\'", name)'
+        sinks = ext._find_sinks(code, {1}, "db.go")
+        assert any(s.sink_category == "fmt_sprintf_sql" for s in sinks)
+
+    def test_detects_http_get_ssrf(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = 'resp, err := http.Get(targetURL)'
+        sinks = ext._find_sinks(code, {1}, "proxy.go")
+        assert any(s.sink_category == "ssrf" for s in sinks)
+
+    def test_detects_r_form_value_source(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = 'name := r.FormValue("name")'
+        sources = ext._find_sources(code, {1}, "handler.go")
+        assert any(s.source_category == "http_param" for s in sources)
+
+
+class TestJavaSinkDetection:
+    """Java sink and source pattern coverage."""
+
+    def _ext(self, tmp_path):
+        return CodeContextExtractor(tmp_path)
+
+    def test_detects_execute_query(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = 'ResultSet rs = stmt.executeQuery("SELECT * FROM users WHERE id=" + id);'
+        sinks = ext._find_sinks(code, {1}, "UserDao.java")
+        assert any(s.sink_category == "sql_exec" for s in sinks)
+
+    def test_detects_runtime_exec(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = 'Runtime.getRuntime().exec(userInput);'
+        sinks = ext._find_sinks(code, {1}, "Cmd.java")
+        assert any(s.sink_category == "cmd_exec" for s in sinks)
+
+    def test_detects_object_input_stream(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = 'ObjectInputStream ois = new ObjectInputStream(request.getInputStream());'
+        sinks = ext._find_sinks(code, {1}, "Handler.java")
+        assert any(s.sink_category == "deserialize" for s in sinks)
+
+    def test_detects_request_get_parameter_source(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = 'String id = request.getParameter("id");'
+        sources = ext._find_sources(code, {1}, "Servlet.java")
+        assert any(s.source_category == "request_param" for s in sources)
+
+    def test_detects_request_param_annotation(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = 'public String search(@RequestParam String query) {'
+        sources = ext._find_sources(code, {1}, "Controller.java")
+        assert any(s.source_category == "annotation_param" for s in sources)
