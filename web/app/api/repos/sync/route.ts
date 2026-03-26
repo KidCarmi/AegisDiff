@@ -48,8 +48,9 @@ async function generateAppJWT(): Promise<string> {
     .sign(privateKey);
 }
 
-async function ghFetch(url: string, token: string) {
+async function ghFetch(url: string, token: string, method = "GET") {
   const resp = await fetch(url, {
+    method,
     headers: {
       Authorization: `Bearer ${token}`,
       Accept: "application/vnd.github+json",
@@ -115,7 +116,8 @@ export async function POST(req: NextRequest) {
       // Get an installation access token to list repos
       const tokenData = await ghFetch(
         `https://api.github.com/app/installations/${inst.id}/access_tokens`,
-        appJWT
+        appJWT,
+        "POST"
       ) as { token: string };
       const installToken = tokenData.token;
 
