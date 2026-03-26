@@ -47,7 +47,7 @@ export function ScanList({ scans }: { scans: Scan[] }) {
           placeholder="Search repo, title, CWE, SHA…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 w-56"
+          className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-gray-400 w-56"
         />
         <div className="flex items-center gap-1.5">
           {VERDICT_FILTERS.map((f) => {
@@ -56,11 +56,11 @@ export function ScanList({ scans }: { scans: Scan[] }) {
             return (
               <button key={f.value} onClick={() => setFilter(f.value)}
                 className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                  active ? "bg-gray-900 text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"
+                  active ? "bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900" : "bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
                 }`}>
                 {f.label}
                 <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
-                  active ? "bg-white/20 text-white" : "bg-gray-100 text-gray-500"
+                  active ? "bg-white/20 text-white dark:bg-black/20 dark:text-gray-900" : "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400"
                 }`}>{count}</span>
               </button>
             );
@@ -69,8 +69,8 @@ export function ScanList({ scans }: { scans: Scan[] }) {
       </div>
 
       {visible.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-gray-200 p-10 text-center">
-          <p className="text-sm text-gray-400">
+        <div className="rounded-lg border border-dashed border-gray-200 dark:border-gray-700 p-10 text-center">
+          <p className="text-sm text-gray-400 dark:text-gray-500">
             {search ? `No results for "${search}"` : "No scans yet."}
           </p>
           {search && (

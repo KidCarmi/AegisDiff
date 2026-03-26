@@ -26,6 +26,7 @@ export async function register() {
     await sql`ALTER TABLE repos ADD COLUMN IF NOT EXISTS installation_id    BIGINT`;
     await sql`ALTER TABLE repos ADD COLUMN IF NOT EXISTS github_repo_id     BIGINT`;
     await sql`ALTER TABLE repos ADD COLUMN IF NOT EXISTS slack_webhook_url  TEXT`;
+    await sql`ALTER TABLE repos ADD COLUMN IF NOT EXISTS deleted_at         TIMESTAMPTZ`;
 
     // ── Phase 1: Discord + Teams + notification thresholds ────────────────
     await sql`ALTER TABLE repos ADD COLUMN IF NOT EXISTS discord_webhook_url    TEXT`;

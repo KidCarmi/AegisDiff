@@ -32,7 +32,12 @@ async function getRecentScans(githubId: number, username: string): Promise<Scan[
         JOIN users u ON r2.user_id = u.id
         WHERE u.github_id = ${githubId}
       )
-      OR (r.installation_id IS NOT NULL AND r.owner = ${username})
+      OR (r.installation_id IS NOT NULL AND EXISTS (
+        SELECT 1 FROM installations i
+        WHERE i.installation_id = r.installation_id
+          AND i.account_login = ${username}
+          AND i.deleted_at IS NULL
+      ))
     ORDER BY s.created_at DESC
     LIMIT 100
   `;
@@ -54,7 +59,12 @@ async function getScanStats(githubId: number, username: string) {
         JOIN users u ON r2.user_id = u.id
         WHERE u.github_id = ${githubId}
       )
-      OR (r.installation_id IS NOT NULL AND r.owner = ${username})
+      OR (r.installation_id IS NOT NULL AND EXISTS (
+        SELECT 1 FROM installations i
+        WHERE i.installation_id = r.installation_id
+          AND i.account_login = ${username}
+          AND i.deleted_at IS NULL
+      ))
     )
     AND s.created_at > NOW() - INTERVAL '30 days'
   `;

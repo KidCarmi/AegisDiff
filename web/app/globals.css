@@ -12,3 +12,9 @@ body {
   color: rgb(var(--foreground-rgb));
   background: rgb(var(--background-start-rgb));
 }
+
+.dark {
+  --foreground-rgb: 249, 250, 251;
+  --background-start-rgb: 3, 7, 18;
+  --background-end-rgb: 3, 7, 18;
+}

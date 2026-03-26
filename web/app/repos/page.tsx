@@ -41,6 +41,8 @@ async function getRepos(githubId: number, username: string): Promise<RepoRow[]> 
     WHERE u.github_id = ${githubId}
     GROUP BY r.id ORDER BY r.created_at DESC`;
 
+  // App-installed repos: match via installations table so org installs
+  // (where r.owner = orgName ≠ username) are included too.
   const appRepos = await sql`
     SELECT r.id, r.owner, r.name, r.created_at AS "createdAt",
            TRUE AS "appInstalled",
@@ -48,8 +50,12 @@ async function getRepos(githubId: number, username: string): Promise<RepoRow[]> 
            COUNT(s.id) FILTER (WHERE s.verdict = 'TRUE_POSITIVE')::text AS "truePositives",
            MAX(s.created_at)::text AS "lastScanAt"
     FROM repos r
+    JOIN installations i ON i.installation_id = r.installation_id
     LEFT JOIN scans s ON s.repo_id = r.id AND s.created_at > NOW() - INTERVAL '30 days'
-    WHERE r.installation_id IS NOT NULL AND r.user_id IS NULL AND r.owner = ${username}
+    WHERE r.installation_id IS NOT NULL
+      AND r.user_id IS NULL
+      AND i.deleted_at IS NULL
+      AND (i.account_login = ${username} OR r.owner = ${username})
     GROUP BY r.id ORDER BY r.created_at DESC`;
 
   const seen = new Set<string>();
