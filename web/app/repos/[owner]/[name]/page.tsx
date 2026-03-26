@@ -119,6 +119,10 @@ export default async function RepoDetailPage({ params }: Props) {
             className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50" download>
             ↓ Export CSV
           </a>
+          <a href={`/repos/${owner}/${name}/settings`}
+            className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50">
+            ⚙ Settings
+          </a>
         </div>
       </div>
 
