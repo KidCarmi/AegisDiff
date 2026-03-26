@@ -65,12 +65,12 @@ jobs:
       - name: Generate diff
         id: diff
         run: |
-          if [ "$\{{ github.event_name }}" = "pull_request" ]; then
-            BASE_SHA="${{ github.event.pull_request.base.sha }}"
-            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          if [ "\${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA="\${{ github.event.pull_request.base.sha }}"
+            HEAD_SHA="\${{ github.event.pull_request.head.sha }}"
           else
-            BASE_SHA="${{ github.event.before }}"
-            HEAD_SHA="${{ github.event.after || github.sha }}"
+            BASE_SHA="\${{ github.event.before }}"
+            HEAD_SHA="\${{ github.event.after || github.sha }}"
           fi
           timeout 60 git diff "\${BASE_SHA}...\${HEAD_SHA}" \\
             -- "*.py" "*.js" "*.ts" "*.tsx" "*.jsx" "*.go" "*.java" "*.rb" "*.php" \\
