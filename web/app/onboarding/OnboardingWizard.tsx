@@ -305,18 +305,28 @@ function StepManualSetup({ ingestUrl, onDone }: { ingestUrl: string; onDone: () 
             <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">Copy the workflow file</span>
           </div>
           <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-            Add this file to your repo at{" "}
-            <code className="bg-gray-100 px-1 rounded text-gray-700">.github/workflows/aegisdiff.yml</code>
+            Save this file at{" "}
+            <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded text-gray-700 dark:text-gray-300">.github/workflows/aegisdiff.yml</code>
+            {" "}in your repo and commit it.
           </p>
-          <a
-            href="https://github.com/KidCarmi/AegisDiff/blob/main/.github/workflows/aegisdiff.yml"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-          >
-            {GITHUB_SVG}
-            View aegisdiff.yml on GitHub
-          </a>
+          <div className="flex gap-2 flex-wrap">
+            <a
+              href="https://github.com/KidCarmi/AegisDiff/blob/main/.github/workflows/aegisdiff.yml"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+            >
+              {GITHUB_SVG}
+              View on GitHub
+            </a>
+            <a
+              href="https://raw.githubusercontent.com/KidCarmi/AegisDiff/main/.github/workflows/aegisdiff.yml"
+              download="aegisdiff.yml"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+            >
+              ↓ Download aegisdiff.yml
+            </a>
+          </div>
         </div>
       </div>
 

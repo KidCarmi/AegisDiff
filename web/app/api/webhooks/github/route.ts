@@ -187,6 +187,127 @@ async function registerRepos(installationId: number, repositories: any[]): Promi
   }
 }
 
+// ── Phase 6: @aegisdiff rescan ────────────────────────────────────────────────
+
+const RESCAN_RE = /@aegisdiff\s+rescan\b/i;
+const MAX_RESCANS_PER_HOUR = 3;
+
+async function handleIssueComment(payload: any): Promise<void> {
+  const { action, comment, issue, repository, installation } = payload;
+
+  // Only process newly created comments; ignore edits
+  if (action !== "created") return;
+
+  // Only handle PR comments (issues have no pull_request key)
+  if (!issue?.pull_request) return;
+
+  // Check for @aegisdiff rescan trigger
+  if (!RESCAN_RE.test(comment?.body ?? "")) return;
+
+  if (!installation?.id) {
+    console.warn("[webhook] issue_comment rescan: missing installation");
+    return;
+  }
+
+  const repo = repository.full_name as string;
+  const prNumber = issue.number as number;
+  const [owner, name] = repo.split("/");
+
+  // Rate-limit: max 3 rescans/PR/hour via audit_log
+  const recent = await sql`
+    SELECT COUNT(*) AS cnt
+    FROM audit_log
+    WHERE action = 'rescan_triggered'
+      AND repo_owner = ${owner}
+      AND repo_name  = ${name}
+      AND (details->>'pr_number')::int = ${prNumber}
+      AND created_at > NOW() - INTERVAL '1 hour'
+  `;
+  const cnt = Number((recent[0] as any).cnt);
+  if (cnt >= MAX_RESCANS_PER_HOUR) {
+    console.log(`[webhook] Rescan rate-limit hit for ${repo}#${prNumber} (${cnt}/hr)`);
+    // Post rate-limit message back to PR
+    await postPrComment(
+      installation.id,
+      owner,
+      name,
+      prNumber,
+      `⏳ Re-scan rate limit reached (max ${MAX_RESCANS_PER_HOUR}/hour). Please wait before requesting another scan.`
+    );
+    return;
+  }
+
+  // Get head SHA from GitHub API (we don't have it in the comment payload)
+  let headSha: string;
+  try {
+    const { getInstallationToken } = await import("../../../../lib/github-app");
+    const token = await getInstallationToken(installation.id, { owner, name });
+    const prResp = await fetch(
+      `https://api.github.com/repos/${owner}/${name}/pulls/${prNumber}`,
+      { headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" } }
+    );
+    if (!prResp.ok) throw new Error(`PR fetch failed: ${prResp.status}`);
+    const prData = await prResp.json();
+    headSha = prData.head.sha;
+  } catch (e) {
+    console.error(`[webhook] Rescan: failed to fetch PR head SHA for ${repo}#${prNumber}:`, e);
+    return;
+  }
+
+  const { rawToken } = deriveRepoToken(repo);
+  await triggerAnalysis(installation.id, repo, prNumber, headSha, rawToken);
+
+  // Audit log
+  await sql`
+    INSERT INTO audit_log (github_id, action, repo_owner, repo_name, details)
+    VALUES (
+      0,
+      'rescan_triggered',
+      ${owner},
+      ${name},
+      ${JSON.stringify({ pr_number: prNumber, head_sha: headSha, triggered_by: "comment" })}
+    )
+  `;
+
+  // Ack comment
+  await postPrComment(
+    installation.id,
+    owner,
+    name,
+    prNumber,
+    "🔄 Re-scan queued — results in ~90s."
+  );
+
+  console.log(`[webhook] Rescan triggered for ${repo}#${prNumber}`);
+}
+
+async function postPrComment(
+  installationId: number,
+  owner: string,
+  name: string,
+  prNumber: number,
+  body: string
+): Promise<void> {
+  try {
+    const { getInstallationToken } = await import("../../../../lib/github-app");
+    const token = await getInstallationToken(installationId, { owner, name });
+    await fetch(
+      `https://api.github.com/repos/${owner}/${name}/issues/${prNumber}/comments`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ body }),
+      }
+    );
+  } catch (e) {
+    console.error("[webhook] Failed to post ack comment:", e);
+  }
+}
+
 async function handlePullRequest(payload: any): Promise<void> {
   const { action, pull_request, repository, installation } = payload;
 
@@ -251,6 +372,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         break;
       case "pull_request":
         await handlePullRequest(payload);
+        break;
+      case "issue_comment":
+        await handleIssueComment(payload);
         break;
       case "ping":
         console.log("[webhook] Ping received — webhook configured correctly");

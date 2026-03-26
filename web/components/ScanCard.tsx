@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { VerdictBadge } from "./VerdictBadge";
+import { Toast } from "./Toast";
 import { SEVERITY_COLORS, type Scan, type VerdictType } from "../lib/types";
 
 const VERDICT_BORDER: Record<VerdictType, string> = {
@@ -21,14 +22,16 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+/** QW1 — Color-code confidence so developers can immediately assess trust level. */
+function confidenceClass(conf: number): string {
+  if (conf >= 0.9) return "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300";
+  if (conf >= 0.7) return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300";
+  if (conf >= 0.5) return "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300";
+  return "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300";
+}
+
 type FeedbackState = "idle" | "loading" | "done" | "error";
 
-/**
- * ScanCard — displays scan metadata and optionally a feedback row.
- *
- * `canFeedback`: pass true when the current user is repo:developer or higher.
- * The feedback buttons are hidden when false so viewers never see them.
- */
 export function ScanCard({
   scan,
   canFeedback = false,
@@ -43,6 +46,9 @@ export function ScanCard({
 
   const [feedbackState, setFeedbackState] = useState<FeedbackState>("idle");
   const [submittedVerdict, setSubmittedVerdict] = useState<VerdictType | null>(null);
+  const [showToast, setShowToast] = useState(false);
+  const [toastType, setToastType] = useState<"success" | "error">("success");
+  const [toastMsg, setToastMsg] = useState("");
 
   const submitFeedback = async (e: React.MouseEvent, correct_verdict: VerdictType) => {
     e.preventDefault();
@@ -56,128 +62,167 @@ export function ScanCard({
         body: JSON.stringify({ correct_verdict }),
       });
       if (!resp.ok) {
-        const data = await resp.json().catch(() => ({}));
-        console.error("[feedback] API error:", data);
         setFeedbackState("error");
+        setToastType("error");
+        setToastMsg("Couldn't save feedback — try again.");
+        setShowToast(true);
         return;
       }
       setSubmittedVerdict(correct_verdict);
       setFeedbackState("done");
+      setToastType("success");
+      setToastMsg(
+        correct_verdict === "FALSE_POSITIVE"
+          ? "Marked as false positive. This CWE will be suppressed in future scans."
+          : "Thanks! Confirmed as true positive."
+      );
+      setShowToast(true);
     } catch {
       setFeedbackState("error");
+      setToastType("error");
+      setToastMsg("Network error — feedback not saved.");
+      setShowToast(true);
     }
   };
 
-  // Which thumbs button makes sense depends on the current verdict
-  const showThumbsDown =
+  const showFPButton =
     canFeedback &&
-    (scan.verdict === "FALSE_POSITIVE" || scan.verdict === "NEEDS_REVIEW");
-  const showThumbsUp =
-    canFeedback &&
+    feedbackState !== "done" &&
     (scan.verdict === "TRUE_POSITIVE" || scan.verdict === "NEEDS_REVIEW");
 
+  const showTPButton =
+    canFeedback &&
+    feedbackState !== "done" &&
+    (scan.verdict === "FALSE_POSITIVE" || scan.verdict === "NEEDS_REVIEW");
+
+  // QW2 — extract CWE number for mitre.org link
+  const cweNum = scan.cweId?.match(/\d+/)?.[0];
+
   return (
-    <div
-      className={`rounded-lg border border-gray-200 dark:border-gray-700 border-l-4 ${borderColor} bg-white dark:bg-gray-900 px-4 py-3 shadow-sm hover:shadow-md transition-shadow`}
-    >
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex-1 min-w-0">
-          {/* Repo + PR + SHA */}
-          <div className="flex items-center gap-2 text-xs text-gray-400 dark:text-gray-500 mb-1 flex-wrap">
-            <span className="font-mono font-semibold text-gray-700 dark:text-gray-200 truncate">{repoSlug}</span>
-            {scan.prNumber && (
-              <>
-                <span>·</span>
-                {scan.prUrl ? (
+    <>
+      {showToast && (
+        <Toast
+          message={toastMsg}
+          type={toastType}
+          onDismiss={() => setShowToast(false)}
+        />
+      )}
+      <div
+        className={`rounded-lg border border-gray-200 dark:border-gray-700 border-l-4 ${borderColor} bg-white dark:bg-gray-900 px-4 py-3 shadow-sm hover:shadow-md transition-shadow`}
+      >
+        {/* QW6 — flex-col on mobile, flex-row on sm+ */}
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+          <div className="flex-1 min-w-0">
+            {/* Repo + PR + SHA + time */}
+            <div className="flex items-center gap-2 text-xs text-gray-400 dark:text-gray-500 mb-1 flex-wrap">
+              <span className="font-mono font-semibold text-gray-700 dark:text-gray-200 truncate">{repoSlug}</span>
+              {scan.prNumber && (
+                <>
+                  <span>·</span>
+                  {scan.prUrl ? (
+                    <a
+                      href={scan.prUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="text-blue-500 hover:underline"
+                    >
+                      PR #{scan.prNumber}
+                    </a>
+                  ) : (
+                    <span>PR #{scan.prNumber}</span>
+                  )}
+                </>
+              )}
+              <span>·</span>
+              <span className="font-mono">{sha}</span>
+              <span>·</span>
+              <span>{timeAgo(scan.createdAt)}</span>
+            </div>
+
+            {/* Title */}
+            {scan.title && (
+              <p className="text-sm text-gray-900 dark:text-gray-50 font-medium truncate" title={scan.title}>
+                {scan.title}
+              </p>
+            )}
+
+            {/* Meta chips */}
+            <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+              {scan.severity && scan.severity !== "N/A" && (
+                <span className={`text-xs font-semibold ${severityClass}`}>{scan.severity}</span>
+              )}
+              {/* QW2 — CWE is now a clickable link to mitre.org */}
+              {scan.cweId && scan.cweId !== "N/A" && (
+                cweNum ? (
                   <a
-                    href={scan.prUrl}
+                    href={`https://cwe.mitre.org/data/definitions/${cweNum}.html`}
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={(e) => e.stopPropagation()}
-                    className="text-blue-500 hover:underline"
+                    className="rounded bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 text-[11px] font-mono text-blue-600 dark:text-blue-400 hover:underline"
                   >
-                    PR #{scan.prNumber}
+                    {scan.cweId}
                   </a>
                 ) : (
-                  <span>PR #{scan.prNumber}</span>
-                )}
-              </>
-            )}
-            <span>·</span>
-            <span className="font-mono">{sha}</span>
-            <span>·</span>
-            <span>{timeAgo(scan.createdAt)}</span>
-          </div>
-
-          {/* Title */}
-          {scan.title && (
-            <p className="text-sm text-gray-900 dark:text-gray-50 font-medium truncate">{scan.title}</p>
-          )}
-
-          {/* Meta chips */}
-          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-            {scan.severity && scan.severity !== "N/A" && (
-              <span className={`text-xs font-semibold ${severityClass}`}>{scan.severity}</span>
-            )}
-            {scan.cweId && scan.cweId !== "N/A" && (
-              <span className="rounded bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 text-[11px] font-mono text-gray-600 dark:text-gray-300">
-                {scan.cweId}
-              </span>
-            )}
-            {scan.confidence != null && (
-              <span className="text-xs text-gray-400 dark:text-gray-500">
-                {Math.round(scan.confidence * 100)}% confidence
-              </span>
-            )}
-            {scan.provider && (
-              <span className="text-xs text-gray-400 dark:text-gray-500 capitalize">{scan.provider}</span>
-            )}
-          </div>
-        </div>
-
-        {/* Right column: verdict badge + feedback buttons */}
-        <div className="shrink-0 self-center flex flex-col items-end gap-2">
-          <VerdictBadge verdict={scan.verdict} />
-
-          {/* Feedback buttons — developer+ only */}
-          {canFeedback && feedbackState !== "done" && (
-            <div className="flex items-center gap-1">
-              {feedbackState === "error" && (
-                <span className="text-[11px] text-red-500 mr-1">Failed</span>
+                  <span className="rounded bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 text-[11px] font-mono text-gray-600 dark:text-gray-300">
+                    {scan.cweId}
+                  </span>
+                )
               )}
-              {showThumbsDown && (
-                <button
-                  title="Mark as missed finding (true positive)"
-                  disabled={feedbackState === "loading"}
-                  onClick={(e) => submitFeedback(e, "TRUE_POSITIVE")}
-                  className="rounded p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-40 transition-colors"
-                >
-                  👎
-                </button>
+              {/* QW1 — color-coded confidence */}
+              {scan.confidence != null && (
+                <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${confidenceClass(scan.confidence)}`}>
+                  {Math.round(scan.confidence * 100)}% confident
+                </span>
               )}
-              {showThumbsUp && (
-                <button
-                  title="Mark as false positive"
-                  disabled={feedbackState === "loading"}
-                  onClick={(e) => submitFeedback(e, "FALSE_POSITIVE")}
-                  className="rounded p-1 text-gray-400 hover:text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 disabled:opacity-40 transition-colors"
-                >
-                  👍
-                </button>
-              )}
-              {feedbackState === "loading" && (
-                <span className="text-[11px] text-gray-400 ml-1">…</span>
+              {scan.provider && (
+                <span className="text-xs text-gray-400 dark:text-gray-500 capitalize">{scan.provider}</span>
               )}
             </div>
-          )}
+          </div>
 
-          {feedbackState === "done" && submittedVerdict && (
-            <span className="text-[11px] text-gray-500 dark:text-gray-400">
-              {submittedVerdict === "FALSE_POSITIVE" ? "Marked FP ✓" : "Marked TP ✓"}
-            </span>
-          )}
+          {/* Right column: verdict + QW5 labeled feedback buttons */}
+          <div className="flex items-center sm:flex-col sm:items-end gap-2 shrink-0">
+            <VerdictBadge verdict={scan.verdict} />
+
+            {feedbackState === "done" && submittedVerdict && (
+              <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                {submittedVerdict === "FALSE_POSITIVE" ? "Marked FP ✓" : "Marked TP ✓"}
+              </span>
+            )}
+
+            {(showFPButton || showTPButton) && (
+              <div className="flex items-center gap-1.5">
+                {feedbackState === "loading" && (
+                  <span className="text-[11px] text-gray-400">…</span>
+                )}
+                {/* QW5 — labeled buttons, not emoji-only */}
+                {showFPButton && (
+                  <button
+                    title="Not a real vulnerability — we'll suppress this CWE in future scans"
+                    disabled={feedbackState === "loading"}
+                    onClick={(e) => submitFeedback(e, "FALSE_POSITIVE")}
+                    className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/40 border border-green-200 dark:border-green-800 disabled:opacity-40 transition-colors"
+                  >
+                    ✓ Mark FP
+                  </button>
+                )}
+                {showTPButton && (
+                  <button
+                    title="This is a real vulnerability that was missed"
+                    disabled={feedbackState === "loading"}
+                    onClick={(e) => submitFeedback(e, "TRUE_POSITIVE")}
+                    className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 border border-red-200 dark:border-red-800 disabled:opacity-40 transition-colors"
+                  >
+                    ⚠ Mark TP
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }

@@ -47,7 +47,7 @@ export function ScanList({ scans, canFeedback = false }: { scans: Scan[]; canFee
           placeholder="Search repo, title, CWE, SHA…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-gray-400 w-56"
+          className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-gray-400 w-full sm:w-56"
         />
         <div className="flex items-center gap-1.5">
           {VERDICT_FILTERS.map((f) => {

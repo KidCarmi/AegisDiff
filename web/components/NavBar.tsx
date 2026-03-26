@@ -9,6 +9,10 @@ const NAV_LINKS = [
   { href: "/settings", label: "Settings" },
 ];
 
+/** QW4 — pulsing dot on Dashboard link when user hasn't checked in >5 min */
+const STALE_MS = 5 * 60 * 1000;
+const LS_KEY = "aegisdiff_dashboard_ts";
+
 function ThemeToggle() {
   const [dark, setDark] = useState(false);
 
@@ -44,6 +48,19 @@ function ThemeToggle() {
 
 export function NavBar() {
   const path = usePathname();
+  const [maybeNewScans, setMaybeNewScans] = useState(false);
+
+  useEffect(() => {
+    if (path === "/dashboard") {
+      // Visiting dashboard — record timestamp, clear badge
+      localStorage.setItem(LS_KEY, String(Date.now()));
+      setMaybeNewScans(false);
+    } else {
+      // On another page — show badge if dashboard hasn't been checked recently
+      const last = parseInt(localStorage.getItem(LS_KEY) ?? "0", 10);
+      setMaybeNewScans(last > 0 && Date.now() - last > STALE_MS);
+    }
+  }, [path]);
 
   function isActive(href: string) {
     if (href === "/dashboard") return path === "/dashboard";
@@ -64,13 +81,17 @@ export function NavBar() {
             <a
               key={href}
               href={href}
-              className={`rounded-md px-3 py-1.5 font-medium transition-colors ${
+              className={`relative rounded-md px-3 py-1.5 font-medium transition-colors ${
                 isActive(href)
                   ? "bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900"
                   : "text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800"
               }`}
             >
               {label}
+              {/* QW4 — "maybe new scans" indicator */}
+              {href === "/dashboard" && maybeNewScans && (
+                <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+              )}
             </a>
           ))}
           <ThemeToggle />

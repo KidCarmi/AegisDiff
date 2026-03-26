@@ -93,7 +93,8 @@ export async function TrendChart({ githubId, username }: Props) {
           </span>
         </div>
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 120 }}>
+      {/* QW6 — responsive: viewBox scales to fill container, fixed height removed */}
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto">
         {bars.map((b, i) => {
           let y = b.y0;
           const segments = [
