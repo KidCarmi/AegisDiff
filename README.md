@@ -2,8 +2,8 @@
 
 **Zero-cost autonomous AppSec triage for pull requests — hosted SaaS.**
 
-AegisDiff is a managed platform. You connect your repos, we run the scans.
-No API keys. No infrastructure. No configuration beyond adding one workflow file.
+AegisDiff is a managed platform. Connect your repo in one click — we run the scans.
+No API keys. No infrastructure. No YAML files. No configuration.
 
 **Platform cost to you: $0/month.**
 
@@ -15,42 +15,44 @@ No API keys. No infrastructure. No configuration beyond adding one workflow file
 PR opened in your repo
     │
     ▼
-GitHub Actions (runs in YOUR environment — your code never leaves GitHub)
+GitHub App webhook → Vercel (verify + dispatch, <1s)
     │
-    ├── git diff → changed files
+    ▼
+repository_dispatch → AegisDiff Engine (GitHub Actions on our repo)
+    │
+    ├── Fetch diff via GitHub App token
     ├── AST parse → sink/source/data-flow extraction
-    ├── GET /api/llm-token  ← OIDC-authenticated, gets platform AI keys
+    ├── Per-file chunked analysis (one verdict per changed file)
+    ├── aegisdiff-ignore comments → suppressed without LLM call
     ├── Gemini 1.5 Pro (primary) ──[fail]──▶ Groq Llama-3 (fallback)
     │
-    ├── Verdict posted as inline PR review comment + commit status
+    ├── Inline PR review comment on the exact vulnerable line
+    ├── Top-level PR summary comment
     └── Scan metadata sent to dashboard (no code, no diffs — metadata only)
 ```
 
 **Verdicts:**
 
 ```
-✅ FALSE_POSITIVE  — Safe, framework handles it
 🚨 TRUE_POSITIVE   — Confirmed vulnerability (confidence ≥ 0.7)
 ⚠️  NEEDS_REVIEW   — Needs human judgment
+✅ FALSE_POSITIVE  — Safe, framework handles it
 ❌ ERROR           — Engine failed (reason shown in dashboard)
 ```
 
 ---
 
-## Quick Start — 2 steps
+## Quick Start — 4 clicks
 
-### Step 1 — Sign up
+1. Go to [app.aegisdiff.io](https://app.aegisdiff.io) → **Sign in with GitHub**
+2. Click **Install AegisDiff on GitHub** → select repos → click **Install**
+3. Open any pull request in a connected repo
+4. Security verdict appears in the PR in ~90 seconds
 
-Go to [app.aegisdiff.io](https://app.aegisdiff.io) and sign in with GitHub.
-Connect your repository. Done — no API keys, no configuration.
+**That's it. Zero configuration. Zero secrets. Zero YAML.**
 
-### Step 2 — Add the workflow
-
-Copy `.github/workflows/aegisdiff.yml` into your repo. The workflow will
-automatically authenticate via GitHub OIDC — no secrets needed.
-
-> **Want unlimited scans?** Add your own `GEMINI_API_KEY` and/or `GROQ_API_KEY`
-> as repo secrets. Your keys take priority and bypass platform rate limits.
+> **Legacy / Self-Hosted:** You can also manually add `.github/workflows/aegisdiff.yml`
+> to your repo and supply your own `GEMINI_API_KEY`. The GitHub App path is recommended.
 
 ---
 
@@ -63,7 +65,7 @@ automatically authenticate via GitHub OIDC — no secrets needed.
 | Scan history | 30 days |
 | Webhooks | Slack, Discord, MS Teams |
 | Dashboard users | Unlimited (RBAC-controlled) |
-| Bring your own AI keys | Unlimited scans |
+| Bring your own AI keys | Unlimited scans, bypasses rate limits |
 
 ---
 
@@ -71,21 +73,23 @@ automatically authenticate via GitHub OIDC — no secrets needed.
 
 | Layer | Service | Cost |
 |---|---|---|
-| Compute | GitHub Actions (runs in user's environment) | $0 — user's quota |
+| Compute | GitHub Actions (AegisDiff's own repo, public = unlimited) | $0 |
 | Primary AI | Google Gemini 1.5 Pro | Free tier: 1,500 req/day |
 | Fallback AI | Groq Llama-3.3-70b | Free tier: 14,400 req/day |
-| Dashboard | Vercel (Next.js 14) | Free tier: unlimited deploys |
+| Webhook handler | Vercel (Next.js 14) | Free tier: unlimited |
 | Database | Neon PostgreSQL (serverless) | Free tier: 0.5 GB |
-| Auth | NextAuth.js + GitHub OAuth | Free |
+| Auth | NextAuth.js + GitHub OAuth + GitHub App | Free |
+| Landing page | Cloudflare Pages | Free |
 
 ---
 
 ## Privacy — Your Code Never Leaves GitHub
 
-- Analysis runs **inside your GitHub Actions runner** — not on AegisDiff servers
-- AegisDiff distributes temporary AI keys to your runner via OIDC token exchange
-- LLM calls are made **from your runner** directly to Gemini/Groq — AegisDiff never sees your code
-- Only scan **metadata** reaches the dashboard: verdict, severity, CWE, confidence, title, timing
+- The GitHub App fetches your PR diff using a scoped installation token
+- LLM calls are made from **AegisDiff's GitHub Actions runner** — your code
+  goes directly from GitHub → Gemini/Groq with no intermediate storage
+- Only scan **metadata** reaches the dashboard: verdict, severity, CWE,
+  confidence, title, timing
 - **No code, no diffs, no evidence strings** are stored in any database
 - Evidence (the vulnerable line) lives only in the GitHub PR comment — on GitHub's servers
 
@@ -93,22 +97,48 @@ automatically authenticate via GitHub OIDC — no secrets needed.
 
 ## RBAC — Access Control
 
-AegisDiff derives roles from your existing GitHub permissions. No manual user management.
+Roles are derived from your existing GitHub permissions. No manual user management.
 
 | Role | Who | Can do |
 |---|---|---|
-| `org:owner` | GitHub org owner | See all org repos, manage org settings, invite members |
+| `platform:admin` | AegisDiff operator (env var) | Platform-wide stats, rate limit overrides, user management |
+| `org:owner` | GitHub org owner | All org repos, org settings |
 | `repo:admin` | GitHub repo admin | Configure webhooks, ignore rules, notification thresholds |
-| `repo:developer` | GitHub repo write access | View scans, submit feedback, trigger rescans |
+| `repo:developer` | GitHub repo write access | View scans, submit verdict feedback, trigger rescans |
 | `repo:viewer` | GitHub repo read access | View scan results (read-only) |
-| `platform:admin` | AegisDiff operator | Platform-wide stats, rate limit overrides, user management |
 
-Roles are resolved at request time via the GitHub API and cached per session.
-No separate role assignments needed — if you have write access on GitHub, you have it here.
+Roles resolved at request time via GitHub API, cached per session (5 min TTL).
+No separate role assignments. If you have write access on GitHub, you have it here.
 
 ---
 
-## AI Failover & Context Trimming
+## Analysis Pipeline
+
+### Per-File Chunked Analysis (Phase 3)
+Large diffs are split by `diff --git` header and analyzed independently.
+Each file gets its own verdict. The worst finding is selected as the PR verdict.
+Accurate per-file line numbers for inline comments.
+
+### Inline PR Review Comments (Phase 2)
+TRUE_POSITIVE findings are posted as inline comments pinned to the exact
+vulnerable line, not just a top-level comment. The top-level comment becomes
+a summary (verdict + severity + CWE).
+
+### `aegisdiff-ignore` Suppression (Phase 4)
+```python
+# aegisdiff-ignore: CWE-89 reason: test-only fixture
+cursor.execute(f"SELECT * FROM {table}")
+```
+Add a comment on or above any sink. AegisDiff short-circuits to FALSE_POSITIVE
+without making an LLM call. Standard SAST workflow.
+
+### Feedback Loop (Phase 5)
+Dashboard shows 👍 / 👎 buttons on each scan card (repo:developer+).
+- 👍 on a TRUE_POSITIVE → marks as false positive, auto-adds to ignore rules
+- 👎 on a FALSE_POSITIVE → marks as missed finding
+All corrections written to audit log.
+
+### AI Failover & Context Trimming
 
 ```
 1. Google Gemini 1.5 Pro  (primary — 1M token context)
@@ -116,7 +146,6 @@ No separate role assignments needed — if you have write access on GitHub, you 
 
 2. Groq Llama-3.3-70b  (fallback — 5,500 token effective budget)
    └── 413 Payload Too Large → halve context scale (1.0→0.5→0.25→0.125) + retry
-   └── Context trimmed at <<<CODE>>> block boundary
 
 Both exhausted → Verdict.error(reason) — reason visible in dashboard title
 ```
@@ -162,7 +191,7 @@ The AI follows a strict 5-step analysis protocol — **disprove before confirmin
 ```bash
 # Python engine
 pip install -e .[dev]
-pytest                              # 63 tests
+pytest                              # 63 tests, ~0.4s
 ruff check aegisdiff/               # Lint (CI gate)
 ruff format aegisdiff/              # Format
 
@@ -179,30 +208,42 @@ npm run build                       # Production build check
 
 ## Roadmap
 
-### Phase 0 — Platform Key Distribution ← in progress
+### ✅ Phase 0 — Platform Key Distribution
 Users need zero secrets. Runners exchange OIDC tokens for platform AI keys
 at `/api/llm-token`. Rate-limited at 50 scans/day per repo on the free tier.
 User-provided keys always win and bypass limits.
 
-### Phase 1 — RBAC
+### ✅ Phase 1 — RBAC
 Role-based access derived from GitHub org/repo permissions. Org owners see
 all repos. Admins configure. Developers view and give feedback. Platform admin
 panel for the operator.
 
-### Phase 2 — Inline PR Review Comments
+### ✅ Phase 2 — Inline PR Review Comments
 Findings pinned to the exact vulnerable line, not just a top-level PR comment.
 
-### Phase 3 — Per-Hunk Analysis
+### ✅ Phase 3 — Per-File Chunked Analysis
 One verdict per changed file. Eliminates the "one verdict for 20 files" problem.
+Aggregated by severity: worst finding becomes the PR verdict.
 
-### Phase 4 — `aegisdiff-ignore` Inline Suppression
-`// aegisdiff-ignore: CWE-89 reason: test-only code` — standard SAST workflow.
+### ✅ Phase 4 — `aegisdiff-ignore` Inline Suppression
+`# aegisdiff-ignore: CWE-89 reason: test-only` — standard SAST workflow.
+Suppressed sinks skip the LLM call entirely.
 
-### Phase 5 — Feedback Loop
-"Wrong verdict" button → auto-adds to ignore rules, feeds prompt calibration.
+### ✅ Phase 5 — Feedback Loop
+👍 / 👎 buttons in dashboard. FALSE_POSITIVE feedback auto-adds to ignore rules.
+All corrections in audit log.
 
 ### Phase 6 — Re-scan on Demand
-`@aegisdiff rescan` in a PR comment triggers a fresh analysis.
+`@aegisdiff rescan` in a PR comment triggers a fresh analysis without a commit.
+Rate-limited: max 3 rescans/PR/hour.
+
+### Phase 7 — SARIF Export + GitHub Code Scanning Integration
+Export findings as SARIF. Integrate with GitHub's native Security tab so
+findings appear alongside Dependabot and CodeQL alerts.
+
+### Phase 8 — Trend Analytics & SLA Tracking
+Per-repo vulnerability velocity charts. Mean-time-to-fix tracking.
+Weekly digest emails. SLA breach alerts (e.g. HIGH unresolved > 7 days).
 
 ---
 
