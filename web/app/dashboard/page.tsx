@@ -1,5 +1,6 @@
 import { getServerSession } from "next-auth/next";
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { authOptions } from "../../lib/auth";
 import { sql } from "../../lib/db";
 import { TrendChart } from "../../components/TrendChart";
@@ -95,8 +96,9 @@ export default async function DashboardPage() {
     hasConnectedRepos(githubId, username),
   ]);
 
-  // New users with no repos → onboarding
-  if (!connected && scans.length === 0) {
+  // New users with no repos → onboarding (skip if they already completed it)
+  const onboarded = cookies().get("aegisdiff_onboarded");
+  if (!connected && scans.length === 0 && !onboarded) {
     redirect("/onboarding");
   }
 

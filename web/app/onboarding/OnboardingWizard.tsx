@@ -362,6 +362,9 @@ function StepDone({ method }: { method: Method }) {
       <div className="flex gap-3">
         <a
           href="/dashboard"
+          onClick={() => {
+            document.cookie = "aegisdiff_onboarded=1; path=/; max-age=31536000; SameSite=Lax";
+          }}
           className="rounded-xl bg-gray-900 px-6 py-3 text-sm font-semibold text-white hover:bg-gray-700 transition-colors"
         >
           Go to dashboard →
