@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { authOptions } from "../../lib/auth";
 import { sql } from "../../lib/db";
 import { RepoSetup } from "./RepoSetup";
+import { SyncButton } from "./SyncButton";
 
 interface RepoRow {
   id: number;
@@ -82,7 +83,8 @@ export default async function ReposPage() {
     <div>
       <div className="mb-6 flex items-center justify-between flex-wrap gap-3">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-50">Connected Repositories</h1>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap items-center">
+          <SyncButton />
           <a href={`https://github.com/apps/${appSlug}/installations/new`} target="_blank"
             rel="noopener noreferrer"
             className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
