@@ -75,10 +75,10 @@ export async function TrendChart({ githubId, username }: Props) {
   });
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+    <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4 shadow-sm">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-gray-700">Weekly Trend</h3>
-        <div className="flex items-center gap-4 text-xs text-gray-500">
+        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Weekly Trend</h3>
+        <div className="flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
           <span className="flex items-center gap-1">
             <span className="inline-block w-2.5 h-2.5 rounded-sm bg-red-400" />
             True Positive
@@ -126,7 +126,8 @@ export async function TrendChart({ githubId, username }: Props) {
                 y={H - 6}
                 textAnchor="middle"
                 fontSize="9"
-                fill="#9ca3af"
+                fill="currentColor"
+              className="text-gray-400 dark:text-gray-500"
               >
                 {b.label}
               </text>
@@ -139,7 +140,8 @@ export async function TrendChart({ githubId, username }: Props) {
           y1={padT + chartH}
           x2={W - padR}
           y2={padT + chartH}
-          stroke="#e5e7eb"
+          stroke="currentColor"
+          className="text-gray-200 dark:text-gray-700"
           strokeWidth="1"
         />
       </svg>
