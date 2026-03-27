@@ -114,9 +114,11 @@ async function buildDigests(): Promise<RepoDigest[]> {
   }));
 }
 
+const BASE_URL = (process.env.NEXTAUTH_URL ?? "https://aegis-diff.vercel.app").replace(/\/$/, "");
+
 function buildSlackPayload(d: RepoDigest): object {
   const repoSlug = `${d.owner}/${d.name}`;
-  const dashUrl = `https://aegis-diff.vercel.app/repos/${d.owner}/${d.name}`;
+  const dashUrl = `${BASE_URL}/repos/${d.owner}/${d.name}`;
   const slaBlock = d.sla_breaches > 0
     ? `\n:rotating_light: *${d.sla_breaches} CRITICAL/HIGH finding${d.sla_breaches > 1 ? "s" : ""} unresolved >7 days*`
     : "";
@@ -153,7 +155,7 @@ function buildSlackPayload(d: RepoDigest): object {
 
 function buildDiscordPayload(d: RepoDigest): object {
   const repoSlug = `${d.owner}/${d.name}`;
-  const dashUrl = `https://aegis-diff.vercel.app/repos/${d.owner}/${d.name}`;
+  const dashUrl = `${BASE_URL}/repos/${d.owner}/${d.name}`;
   const color = d.sla_breaches > 0 ? 0xff0000 : d.true_positives > 0 ? 0xfbbf24 : 0x4ade80;
 
   const lines = [
@@ -174,7 +176,7 @@ function buildDiscordPayload(d: RepoDigest): object {
         url: dashUrl,
         color,
         description: lines.join("\n"),
-        footer: { text: "AegisDiff • aegis-diff.vercel.app" },
+        footer: { text: `AegisDiff • ${BASE_URL.replace(/^https?:\/\//, "")}` },
       },
     ],
   };
@@ -182,7 +184,7 @@ function buildDiscordPayload(d: RepoDigest): object {
 
 function buildTeamsPayload(d: RepoDigest): object {
   const repoSlug = `${d.owner}/${d.name}`;
-  const dashUrl = `https://aegis-diff.vercel.app/repos/${d.owner}/${d.name}`;
+  const dashUrl = `${BASE_URL}/repos/${d.owner}/${d.name}`;
 
   const facts = [
     { name: "True Positives", value: String(d.true_positives) },

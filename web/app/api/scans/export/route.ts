@@ -112,7 +112,7 @@ export async function GET(req: NextRequest) {
         driver: {
           name: "AegisDiff",
           version: "1.0.0",
-          informationUri: "https://aegis-diff.vercel.app",
+          informationUri: (process.env.NEXTAUTH_URL ?? "https://aegis-diff.vercel.app").replace(/\/$/, ""),
           rules: [],
         },
       },

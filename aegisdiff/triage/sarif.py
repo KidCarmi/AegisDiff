@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import gzip
 import json
+import os
 from typing import List
 
 from .verdicts import Verdict, VerdictType
@@ -152,7 +153,9 @@ def build_sarif(verdicts: List[Verdict], repo: str, commit_sha: str) -> dict:
                     "driver": {
                         "name": "AegisDiff",
                         "version": "1.0.0",
-                        "informationUri": "https://aegis-diff.vercel.app",
+                        "informationUri": os.environ.get(
+                            "AEGISDIFF_BASE_URL", "https://aegis-diff.vercel.app"
+                        ),
                         "rules": list(seen_rules.values()),
                     }
                 },

@@ -1,31 +1,38 @@
 /**
  * POST /api/admin/cleanup
  *
- * Deletes scan records older than 90 days (retention policy).
- * Called daily by the cleanup GitHub Actions workflow.
- * Authenticated via the same AEGISDIFF_REPO_TOKEN mechanism.
+ * Deletes scan records older than each user's retention window (default 90 days).
+ * Called daily by the cleanup GitHub Actions workflow (.github/workflows/cleanup.yml).
+ *
+ * Auth: Bearer <CRON_SECRET>
+ *   CRON_SECRET must be set in Vercel env vars and stored in GitHub secrets as
+ *   AEGISDIFF_CLEANUP_SECRET in the AegisDiff repo. Vercel also injects it
+ *   automatically for scheduled Cron invocations.
+ *
+ *   The old repo-token auth is intentionally removed: any user who knew their
+ *   repo ingest token could previously trigger a global scan delete.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { createHash } from "crypto";
 import { sql } from "../../../../lib/db";
 
 export async function POST(req: NextRequest) {
+  const cronSecret = process.env.CRON_SECRET;
+  if (!cronSecret) {
+    // Endpoint is disabled when CRON_SECRET is not configured.
+    return NextResponse.json(
+      { error: "Cleanup not configured — set CRON_SECRET in Vercel env vars" },
+      { status: 503 }
+    );
+  }
+
   const authHeader = req.headers.get("authorization") ?? "";
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
 
-  if (!token) {
-    return NextResponse.json({ error: "Missing authorization" }, { status: 401 });
+  if (!token || token !== cronSecret) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Any valid repo token can trigger cleanup (the operation is safe and non-destructive to other repos)
-  const tokenHash = createHash("sha256").update(token).digest("hex");
-  const repoRows = await sql`SELECT id FROM repos WHERE token_hash = ${tokenHash} LIMIT 1`;
-
-  if (repoRows.length === 0) {
-    return NextResponse.json({ error: "Invalid token" }, { status: 401 });
-  }
-
-  // Respect per-user retention setting; fall back to 90 days for unowned repos
+  // Delete scans older than the per-user retention setting (default 90 days).
   const result = await sql`
     DELETE FROM scans s
     USING repos r

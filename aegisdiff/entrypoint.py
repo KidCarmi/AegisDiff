@@ -63,7 +63,7 @@ def _fetch_platform_keys(ingest_url: str, oidc_token: str) -> dict:
                 "Add GEMINI_API_KEY or GROQ_API_KEY to your repo secrets for unlimited scans.",
                 data.get("error", "limit reached"),
                 data.get("scans_today", "?"),
-                data.get("limit", 50),
+                data.get("limit", 100),
             )
             return {}
         if resp.status_code == 503:
@@ -206,7 +206,7 @@ def main() -> None:
             logger.error(
                 "No LLM keys available. Either:\n"
                 "  1. Add GEMINI_API_KEY or GROQ_API_KEY to your repo secrets (unlimited), or\n"
-                "  2. Ensure AEGISDIFF_INGEST_URL is set (platform keys, 50 scans/day free)."
+                "  2. Ensure AEGISDIFF_INGEST_URL is set (platform keys, 100 scans/day free)."
             )
             sys.exit(1)
     else:
