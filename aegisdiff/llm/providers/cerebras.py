@@ -28,7 +28,7 @@ _TOO_LARGE_PHRASES = (
 
 class CerebrasProvider(LLMProvider):
     name = "cerebras"
-    model = "llama-3.3-70b"
+    model = "llama3.3-70b"
     max_context_tokens = 7_000  # Conservative below Cerebras free-tier burst limit
 
     def __init__(self, api_key: str) -> None:

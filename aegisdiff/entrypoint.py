@@ -170,8 +170,6 @@ def main() -> None:
     )
     from .llm.orchestrator import LLMOrchestrator
     from .llm.providers.cerebras import CerebrasProvider
-    from .llm.providers.gemini import GeminiProvider
-    from .llm.providers.groq import GroqProvider
     from .llm.providers.openrouter import OpenRouterProvider
     from .triage.engine import TriageEngine
     from .triage.verdicts import VerdictType
@@ -189,51 +187,19 @@ def main() -> None:
         ]
         if k
     ]
-    openrouter_keys = [
-        k
-        for k in [
-            cfg.openrouter_api_key,
-            cfg.openrouter_api_key_2,
-        ]
-        if k
-    ]
-    groq_keys = [
-        k
-        for k in [
-            cfg.groq_api_key,
-            cfg.groq_api_key_2,
-            cfg.groq_api_key_3,
-            cfg.groq_api_key_4,
-            cfg.groq_api_key_5,
-            cfg.groq_api_key_6,
-        ]
-        if k
-    ]
-    gemini_key = cfg.gemini_api_key
+    openrouter_keys = [k for k in [cfg.openrouter_api_key, cfg.openrouter_api_key_2] if k]
 
     # ── Build provider list ────────────────────────────────────────────────
-    # Priority order (best → last resort):
-    #   1. Cerebras    — fastest, truly free tier, no data retention
-    #   2. OpenRouter  — free ':free' models, no credits needed
-    #   3. Groq        — legacy fallback (currently org-restricted)
-    #   4. Gemini      — Google AI Studio fallback
-    # Platform keys (via OIDC) are appended after user keys for each provider.
+    # Priority: Cerebras (fastest free tier) → OpenRouter (:free models)
+    # Platform keys via OIDC appended as fallback after user keys.
     providers = []
     for i, key in enumerate(cerebras_keys, start=1):
         providers.append(CerebrasProvider(key))
-        logger.info("Provider: Cerebras llama-3.3-70b (user key %d/%d)", i, len(cerebras_keys))
+        logger.info("Provider: Cerebras llama3.3-70b (user key %d/%d)", i, len(cerebras_keys))
     for i, key in enumerate(openrouter_keys, start=1):
         providers.append(OpenRouterProvider(key))
         logger.info("Provider: OpenRouter :free (user key %d/%d)", i, len(openrouter_keys))
-    for i, key in enumerate(groq_keys, start=1):
-        providers.append(GroqProvider(key))
-        logger.info("Provider: Groq llama-3.3-70b (user key %d/%d)", i, len(groq_keys))
-    if gemini_key:
-        providers.append(GeminiProvider(gemini_key))
-        logger.info("Provider: Gemini 2.0 Flash (user key)")
 
-    # Platform keys via OIDC — always appended as fallback even when user keys
-    # are set, ensuring scans work if user keys expire, are revoked, or hit quota.
     oidc = _get_oidc_token()
     if oidc and cfg.aegisdiff_ingest_url:
         if not providers:
@@ -243,22 +209,12 @@ def main() -> None:
         platform = _fetch_platform_keys(cfg.aegisdiff_ingest_url, oidc)
         platform_cerebras = [k for k in platform.get("cerebras_keys", []) if k]
         platform_openrouter = [k for k in platform.get("openrouter_keys", []) if k]
-        platform_groq = [k for k in platform.get("groq_keys", []) if k]
-        if not platform_groq and platform.get("groq_key"):
-            platform_groq = [platform["groq_key"]]
-        platform_gemini = platform.get("gemini_key", "") or ""
         for i, key in enumerate(platform_cerebras, start=1):
             providers.append(CerebrasProvider(key))
             logger.info("Provider: Cerebras (platform %d/%d)", i, len(platform_cerebras))
         for i, key in enumerate(platform_openrouter, start=1):
             providers.append(OpenRouterProvider(key))
             logger.info("Provider: OpenRouter (platform %d/%d)", i, len(platform_openrouter))
-        for i, key in enumerate(platform_groq, start=1):
-            providers.append(GroqProvider(key))
-            logger.info("Provider: Groq (platform %d/%d)", i, len(platform_groq))
-        if platform_gemini:
-            providers.append(GeminiProvider(platform_gemini))
-            logger.info("Provider: Gemini 2.0 Flash (platform key)")
 
     if not providers:
         logger.error(
