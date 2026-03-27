@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 
 import httpx
@@ -9,6 +10,18 @@ import httpx
 from .base import LLMProvider, LLMRequest, LLMResponse
 
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+logger = logging.getLogger(__name__)
+
+# Groq error substrings that indicate the request is too large
+_GROQ_TOO_LARGE_PHRASES = (
+    "too large",
+    "too long",
+    "reduce",
+    "context_length_exceeded",
+    "maximum context",
+    "tokens per",
+)
 
 
 class GroqProvider(LLMProvider):
@@ -37,6 +50,33 @@ class GroqProvider(LLMProvider):
             headers=headers,
             timeout=30.0,
         )
+        if not resp.is_success:
+            # Log Groq's error body before raising so we can diagnose failures.
+            # Also rewrite 400 → 413 when Groq signals the request is too large,
+            # so the orchestrator's adaptive trimming kicks in.
+            try:
+                err_body = resp.json()
+                err_msg = err_body.get("error", {}).get("message", "")
+            except Exception:
+                err_msg = resp.text[:300]
+            logger.warning("Groq HTTP %d: %s", resp.status_code, err_msg)
+
+            if resp.status_code == 400 and any(
+                phrase in err_msg.lower() for phrase in _GROQ_TOO_LARGE_PHRASES
+            ):
+                # Mutate a synthetic 413 so the orchestrator shrinks context
+                synthetic = httpx.Response(
+                    status_code=413,
+                    headers=resp.headers,
+                    content=resp.content,
+                    request=resp.request,
+                )
+                raise httpx.HTTPStatusError(
+                    f"Groq 400 rewritten to 413 (context too large): {err_msg}",
+                    request=resp.request,
+                    response=synthetic,
+                )
+
         resp.raise_for_status()
         data = resp.json()
         latency = (time.monotonic() - t0) * 1000
