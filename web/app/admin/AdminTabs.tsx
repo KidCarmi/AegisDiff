@@ -24,6 +24,7 @@ interface RateLimitedRepo {
   owner: string;
   name: string;
   scans_today: number;
+  daily_limit: number;
 }
 
 interface AuditEvent {
@@ -177,7 +178,7 @@ function OverviewTab({
           </div>
           {rateLimited.length === 0 ? (
             <p className="px-5 py-6 text-sm text-gray-400 text-center">
-              No repos have hit the 100/day limit
+              No repos are near their daily limit
             </p>
           ) : (
             <table className="w-full text-sm">
@@ -501,7 +502,7 @@ function RateLimitsTab({ rateLimited }: { rateLimited: RateLimitedRepo[] }) {
         </div>
         {rateLimited.length === 0 ? (
           <p className="px-5 py-8 text-center text-sm text-gray-400">
-            No repos have hit the 100/day limit today
+            No repos are near their daily limit today
           </p>
         ) : (
           <table className="w-full text-sm">
@@ -511,6 +512,7 @@ function RateLimitsTab({ rateLimited }: { rateLimited: RateLimitedRepo[] }) {
                 <th className="px-5 py-2 font-medium text-right">
                   Scans today
                 </th>
+                <th className="px-5 py-2 font-medium text-right">Limit</th>
                 <th className="px-5 py-2 font-medium text-right">Action</th>
               </tr>
             </thead>
@@ -526,16 +528,19 @@ function RateLimitsTab({ rateLimited }: { rateLimited: RateLimitedRepo[] }) {
                   <td className="px-5 py-2 text-right font-semibold text-orange-600 dark:text-orange-400">
                     {r.scans_today}
                   </td>
+                  <td className="px-5 py-2 text-right text-gray-500 dark:text-gray-400 text-xs">
+                    {r.daily_limit}
+                  </td>
                   <td className="px-5 py-2 text-right">
                     <button
                       onClick={() => {
                         setOwner(r.owner);
                         setName(r.name);
-                        setLimit("500");
+                        setLimit(String(r.daily_limit));
                       }}
-                      className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                      className="text-xs text-brand-blue hover:underline"
                     >
-                      Boost limit
+                      Set limit
                     </button>
                   </td>
                 </tr>
