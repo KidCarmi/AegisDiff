@@ -87,7 +87,7 @@ export async function GET(req: NextRequest) {
     process.env.PLATFORM_GROQ_API_KEY_6,
   ].filter(Boolean) as string[];
 
-  if (groqKeys.length === 0) {
+  if (!geminiKey && groqKeys.length === 0) {
     return NextResponse.json(
       { error: "Platform AI keys not configured — contact support." },
       { status: 503 }
