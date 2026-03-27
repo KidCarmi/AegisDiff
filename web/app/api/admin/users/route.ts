@@ -22,9 +22,11 @@ export async function GET(_req: NextRequest) {
       u.username,
       u.email,
       u.created_at,
-      COUNT(DISTINCT r.id)   AS repo_count,
-      COUNT(s.id)            AS total_scans,
-      MAX(s.created_at)      AS last_scan_at
+      COUNT(DISTINCT r.id)                              AS repo_count,
+      COUNT(s.id)                                       AS total_scans,
+      MAX(s.created_at)                                 AS last_scan_at,
+      MAX(COALESCE(r.custom_daily_limit, 100))          AS daily_limit,
+      BOOL_OR(r.custom_daily_limit IS NOT NULL)         AS has_custom_limit
     FROM users u
     LEFT JOIN repos r ON (
       r.user_id = u.id

@@ -254,6 +254,8 @@ interface PlatformUser {
   repo_count: number;
   total_scans: number;
   last_scan_at?: string;
+  daily_limit: number;
+  has_custom_limit: boolean;
 }
 
 function UsersTab() {
@@ -312,6 +314,7 @@ function UsersTab() {
               <th className="px-5 py-2 font-medium">User</th>
               <th className="px-5 py-2 font-medium text-right">Repos</th>
               <th className="px-5 py-2 font-medium text-right">Scans</th>
+              <th className="px-5 py-2 font-medium text-right">Daily limit</th>
               <th className="px-5 py-2 font-medium">Last scan</th>
               <th className="px-5 py-2 font-medium">Joined</th>
             </tr>
@@ -352,6 +355,12 @@ function UsersTab() {
                 <td className="px-5 py-2 text-right text-gray-700 dark:text-gray-300">
                   {u.total_scans}
                 </td>
+                <td className="px-5 py-2 text-right">
+                  <span className={`text-xs font-medium ${u.has_custom_limit ? "text-brand-blue" : "text-gray-400 dark:text-gray-500"}`}>
+                    {u.daily_limit ?? 100}
+                    {u.has_custom_limit && <span className="ml-1 text-[10px] opacity-70">custom</span>}
+                  </span>
+                </td>
                 <td className="px-5 py-2 text-xs text-gray-500 dark:text-gray-400">
                   {u.last_scan_at
                     ? new Date(u.last_scan_at).toLocaleDateString()
@@ -365,7 +374,7 @@ function UsersTab() {
             {users.length === 0 && (
               <tr>
                 <td
-                  colSpan={5}
+                  colSpan={6}
                   className="px-5 py-8 text-center text-sm text-gray-400"
                 >
                   No users yet
