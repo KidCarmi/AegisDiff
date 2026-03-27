@@ -49,7 +49,12 @@ class GeminiProvider(LLMProvider):
             except Exception:
                 err_msg = resp.text[:300]
             logger.warning("Gemini HTTP %d: %s", resp.status_code, err_msg)
-        resp.raise_for_status()
+            # Raise with the actual API error body so it surfaces in the dashboard title.
+            # Use httpx.HTTPStatusError for retryable codes so the orchestrator backs off;
+            # use ValueError for non-retryable codes so the full message is visible.
+            if resp.status_code in {429, 500, 502, 503, 504}:
+                resp.raise_for_status()
+            raise ValueError(f"Gemini {resp.status_code}: {err_msg}")
         data = resp.json()
         latency = (time.monotonic() - t0) * 1000
 

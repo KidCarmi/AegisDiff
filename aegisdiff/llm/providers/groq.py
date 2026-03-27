@@ -29,8 +29,10 @@ class GroqProvider(LLMProvider):
     model = "llama-3.3-70b-versatile"
     max_context_tokens = 5_500  # Conservative: free-tier burst + HTTP body limit headroom
 
-    def __init__(self, api_key: str) -> None:
+    def __init__(self, api_key: str, model: str | None = None) -> None:
         self._api_key = api_key
+        if model:
+            self.model = model
 
     def complete(self, request: LLMRequest) -> LLMResponse:
         payload = {
@@ -81,8 +83,9 @@ class GroqProvider(LLMProvider):
                         response=synthetic,
                     )
                 # Known non-size 400 (e.g. invalid model, bad request format) —
-                # log it clearly and let raise_for_status() produce a non-retryable error
+                # raise with the actual API error body so it surfaces in the dashboard
                 logger.error("Groq 400 (non-size): %s", err_msg)
+                raise ValueError(f"Groq API 400: {err_msg}")
 
         resp.raise_for_status()
         data = resp.json()

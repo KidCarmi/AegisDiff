@@ -197,13 +197,23 @@ def main() -> None:
     # (100 scans/day free). Platform keys are ALWAYS appended as fallback
     # even when user keys are set — this ensures scans work even when user
     # keys expire, are revoked, or hit quota.
+    # Primary Groq model — try this first with all available keys.
+    _GROQ_PRIMARY = "llama-3.3-70b-versatile"
+    # Fallback Groq model — different family, survives primary model deprecation.
+    _GROQ_FALLBACK = "llama-3.1-8b-instant"
+
     providers = []
     if gemini_key:
         providers.append(GeminiProvider(gemini_key))
         logger.info("Provider: Gemini 2.0 Flash (user key)")
     for i, key in enumerate(groq_keys, start=1):
-        providers.append(GroqProvider(key))
-        logger.info("Provider: Groq Llama-3-70b (user key %d/%d)", i, len(groq_keys))
+        providers.append(GroqProvider(key, model=_GROQ_PRIMARY))
+        logger.info("Provider: Groq %s (user key %d/%d)", _GROQ_PRIMARY, i, len(groq_keys))
+    # Append the same user keys again with the fallback model — if primary model
+    # is deprecated/unavailable, the fallback model on the same key will be tried.
+    for i, key in enumerate(groq_keys, start=1):
+        providers.append(GroqProvider(key, model=_GROQ_FALLBACK))
+        logger.info("Provider: Groq %s fallback (user %d/%d)", _GROQ_FALLBACK, i, len(groq_keys))
 
     # Always attempt to fetch platform keys via OIDC and append as fallback.
     # Non-fatal if OIDC is unavailable (local runs, forks without secrets).
@@ -222,8 +232,12 @@ def main() -> None:
             providers.append(GeminiProvider(platform_gemini))
             logger.info("Provider: Gemini 2.0 Flash (platform key)")
         for i, key in enumerate(platform_groq, start=1):
-            providers.append(GroqProvider(key))
-            logger.info("Provider: Groq Llama-3-70b (platform key %d/%d)", i, len(platform_groq))
+            providers.append(GroqProvider(key, model=_GROQ_PRIMARY))
+            logger.info("Provider: Groq %s (platform %d/%d)", _GROQ_PRIMARY, i, len(platform_groq))
+        for i, key in enumerate(platform_groq, start=1):
+            providers.append(GroqProvider(key, model=_GROQ_FALLBACK))
+            n = len(platform_groq)
+            logger.info("Provider: Groq %s fallback (platform %d/%d)", _GROQ_FALLBACK, i, n)
 
     if not providers:
         logger.error(
