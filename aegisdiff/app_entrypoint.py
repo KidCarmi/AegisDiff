@@ -128,6 +128,8 @@ def main() -> None:
             os.environ.get("GROQ_API_KEY_2", ""),
             os.environ.get("GROQ_API_KEY_3", ""),
             os.environ.get("GROQ_API_KEY_4", ""),
+            os.environ.get("GROQ_API_KEY_5", ""),
+            os.environ.get("GROQ_API_KEY_6", ""),
         ]
         if k
     ]

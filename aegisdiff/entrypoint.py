@@ -180,7 +180,10 @@ def main() -> None:
 
     groq_keys = [
         k
-        for k in [cfg.groq_api_key, cfg.groq_api_key_2, cfg.groq_api_key_3, cfg.groq_api_key_4]
+        for k in [
+            cfg.groq_api_key, cfg.groq_api_key_2, cfg.groq_api_key_3,
+            cfg.groq_api_key_4, cfg.groq_api_key_5, cfg.groq_api_key_6,
+        ]
         if k
     ]
     gemini_key = cfg.gemini_api_key
@@ -192,9 +195,9 @@ def main() -> None:
             logger.info("No user LLM keys found — fetching platform keys via OIDC")
             platform = _fetch_platform_keys(cfg.aegisdiff_ingest_url, oidc)
             gemini_key = platform.get("gemini_key", "") or ""
-            groq_key = platform.get("groq_key", "") or ""
-            if groq_key:
-                groq_keys = [groq_key]
+            groq_keys = [k for k in platform.get("groq_keys", []) if k]
+            if not groq_keys and platform.get("groq_key"):
+                groq_keys = [platform["groq_key"]]
         if not gemini_key and not groq_keys:
             logger.error(
                 "No LLM keys available. Either:\n"
