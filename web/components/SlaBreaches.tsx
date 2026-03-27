@@ -1,8 +1,9 @@
 "use client";
 
 /**
- * SlaBreaches — fetches and displays HIGH/CRITICAL findings open >7 days.
- * Rendered as a client component so it lazy-loads after the main dashboard.
+ * SlaBreaches — always-visible SLA tracker.
+ * Shows a green "all clear" when no breaches, red alert when there are.
+ * Lazy-loads after main dashboard render.
  */
 import { useEffect, useState } from "react";
 
@@ -25,20 +26,42 @@ const SEVERITY_COLOR: Record<string, string> = {
 };
 
 export function SlaBreaches({ slaDays = 7 }: { slaDays?: number }) {
-  const [breaches, setBreaches] = useState<SLABreach[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [breaches, setBreaches] = useState<SLABreach[] | null>(null);
 
   useEffect(() => {
     fetch(`/api/scans/sla-breaches?sla_days=${slaDays}`)
       .then((r) => r.json())
       .then((data) => setBreaches(data.breaches ?? []))
-      .catch(() => {})
-      .finally(() => setLoading(false));
+      .catch(() => setBreaches([]));
   }, [slaDays]);
 
-  if (loading || breaches.length === 0) return null;
+  // Still loading — show skeleton
+  if (breaches === null) {
+    return (
+      <div className="mb-6 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4 animate-pulse">
+        <div className="h-4 w-48 bg-gray-200 dark:bg-gray-700 rounded" />
+      </div>
+    );
+  }
 
-  // Group by repo
+  // All clear
+  if (breaches.length === 0) {
+    return (
+      <div className="mb-6 rounded-xl border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/30 px-4 py-3 flex items-center gap-2">
+        <span className="text-green-600 dark:text-green-400 text-base">✓</span>
+        <div>
+          <span className="text-sm font-semibold text-green-800 dark:text-green-200">
+            SLA — All clear
+          </span>
+          <span className="ml-2 text-xs text-green-600 dark:text-green-400">
+            No CRITICAL/HIGH findings unresolved &gt;{slaDays} days
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  // Group breaches by repo
   const byRepo = breaches.reduce<Record<string, SLABreach[]>>((acc, b) => {
     const key = `${b.repoOwner}/${b.repoName}`;
     if (!acc[key]) acc[key] = [];
@@ -49,7 +72,7 @@ export function SlaBreaches({ slaDays = 7 }: { slaDays?: number }) {
   return (
     <div className="mb-6 rounded-xl border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/40 p-4">
       <div className="flex items-center gap-2 mb-3">
-        <span className="text-lg">🚨</span>
+        <span className="text-base">🚨</span>
         <h2 className="text-sm font-semibold text-red-900 dark:text-red-100">
           SLA Breach — {breaches.length} CRITICAL/HIGH finding{breaches.length !== 1 ? "s" : ""} unresolved &gt;{slaDays} days
         </h2>
@@ -112,7 +135,7 @@ export function SlaBreaches({ slaDays = 7 }: { slaDays?: number }) {
       </div>
 
       <p className="mt-3 text-[11px] text-red-600 dark:text-red-400">
-        Mark findings as false positive to dismiss them, or open the PR to fix the vulnerability.
+        Mark findings as false positive to dismiss, or open the PR to fix the vulnerability.
       </p>
     </div>
   );
