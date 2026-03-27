@@ -41,10 +41,12 @@ async function getStats() {
         FROM users
       `,
       sql`
-        SELECT r.owner, r.name, COUNT(s.id) AS scans_today
+        SELECT r.owner, r.name, COUNT(s.id) AS scans_today,
+               COALESCE(r.custom_daily_limit, 100) AS daily_limit
         FROM repos r JOIN scans s ON s.repo_id = r.id
         WHERE s.created_at > NOW() - INTERVAL '24 hours'
-        GROUP BY r.owner, r.name HAVING COUNT(s.id) >= 100
+        GROUP BY r.owner, r.name, r.custom_daily_limit
+        HAVING COUNT(s.id) >= COALESCE(r.custom_daily_limit, 100) * 0.8
         ORDER BY scans_today DESC
       `,
       sql`
