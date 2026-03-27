@@ -244,42 +244,41 @@ line. Top-level comment is a summary only. Both `entrypoint.py` (manual path)
 and `app_entrypoint.py` (GitHub App path) use inline comments. 25 tests added
 in `tests/test_pr_comment.py`.
 
-### Phase 3 — Per-Hunk Analysis
+### ✅ Phase 3 — Per-Hunk Analysis (COMPLETE)
 
-**Goal:** Analyze each changed file independently. Aggregate results.
+Each changed file analyzed independently. Results aggregated (highest severity wins).
+`analyze_diff_chunked()` in `engine.py` splits by `diff --git` headers.
+`entrypoint.py` uses chunked mode when diff > 100 lines (`CHUNKED_DIFF_THRESHOLD`).
+Ingest accepts array payloads — one DB row per finding per PR.
 
-- `aegisdiff/triage/engine.py` — `analyze_diff_chunked(diff)`: split by
-  `diff --git` headers, analyze each independently, return list of Verdicts
-- Aggregate: highest severity wins for overall PR status
-- `aegisdiff/entrypoint.py` — chunked mode when diff > 100 lines
-- Dashboard ingest accepts array (one row per finding per PR)
+### ✅ Phase 4 — `aegisdiff-ignore` Inline Suppression (COMPLETE)
 
-### Phase 4 — `aegisdiff-ignore` Inline Suppression
+`# aegisdiff-ignore: CWE-89 reason: test-only` on or above a sink silences it.
+`extractor.py` detects `_IGNORE_RE` for Python/Ruby/JS/TS/Go/Java comment styles.
+`engine.py` short-circuits with `Verdict.suppressed()` when all sinks are suppressed.
+`ingest/route.ts` persists suppressions to `ignore_rules` table.
 
-**Goal:** `# aegisdiff-ignore: CWE-89 reason: test-only` silences a finding.
+### ✅ Phase 5 — Feedback Loop (COMPLETE)
 
-- `aegisdiff/code_context/extractor.py` — detect ignore comments on/above sinks
-- `aegisdiff/triage/engine.py` — suppressed sink → FALSE_POSITIVE with reason
-- `web/app/api/ingest/route.ts` — write suppression to `ignore_rules` table
+"Mark FP / Mark TP" buttons in `ScanCard.tsx` (developer+ role only).
+`POST /api/scans/[id]/feedback` upserts `scan_feedback`, writes `audit_log`.
+FALSE_POSITIVE feedback on a TRUE_POSITIVE auto-adds to `ignore_rules`.
 
-### Phase 5 — Feedback Loop
+### ✅ Phase 6 — Re-scan on Demand (COMPLETE)
 
-**Goal:** "Wrong verdict" button lets developers correct FPs/FNs.
+`@aegisdiff rescan` in any PR comment triggers a fresh scan (case-insensitive).
+`webhooks/github/route.ts` handles `issue_comment` event, rate-limits to 3/PR/hour.
+`POST /api/scans/[id]/rescan` provides same trigger from the dashboard UI.
+`RescanButton.tsx` component with loading/queued state.
+Ack comment posted: "🔄 Re-scan queued — results in ~90s."
 
-- `web/app/api/scans/[id]/feedback/route.ts` — POST `{correct_verdict, reason}`
-- `web/components/ScanCard.tsx` — thumbs up/down UI (developer+ role only)
-- FALSE_POSITIVE feedback on TRUE_POSITIVE → auto-add to `ignore_rules`
-- All corrections written to `audit_log` + new `scan_feedback` table
+### ✅ Phase 8 — Trend Analytics & SLA Tracking (COMPLETE)
 
-### Phase 6 — Re-scan on Demand
-
-**Goal:** `@aegisdiff rescan` triggers a fresh scan without pushing a commit.
-
-- `web/app/api/webhooks/github/route.ts` — handle `issue_comment` event
-- Detect `@aegisdiff rescan` (case-insensitive)
-- Trigger `aegisdiff.yml` via `repository_dispatch`
-- Rate-limit: max 3 rescans/PR/hour (check `audit_log`)
-- Post ack comment: "Re-scan queued — results in ~90s"
+Weekly digest cron (Monday 09:00 UTC) fires Slack/Discord/Teams webhooks per repo.
+`GET /api/scans/sla-breaches` — CRITICAL/HIGH TRUE_POSITIVEs open > N days.
+`SlaBreaches.tsx` dashboard section: green all-clear or red breach list.
+MTTF (Mean Time To Fix) stat card on dashboard (avg days TRUE_POSITIVE → feedback).
+`vercel.json` cron schedule; protected by `CRON_SECRET`.
 
 ## Modifying the System Prompt
 
