@@ -82,33 +82,37 @@ async function getScanStats(githubId: number, username: string) {
  * Returns null when there is no feedback data yet.
  */
 async function getMttfDays(githubId: number, username: string): Promise<number | null> {
-  const rows = await sql`
-    SELECT
-      AVG(
-        EXTRACT(EPOCH FROM (sf.created_at - s.created_at)) / 86400.0
-      ) AS avg_days
-    FROM scans s
-    JOIN scan_feedback sf ON sf.scan_id = s.id
-    JOIN repos r ON s.repo_id = r.id
-    WHERE
-      s.verdict = 'TRUE_POSITIVE'
-      AND sf.correct_verdict = 'FALSE_POSITIVE'
-      AND (
-        r.id IN (
-          SELECT r2.id FROM repos r2
-          JOIN users u ON r2.user_id = u.id
-          WHERE u.github_id = ${githubId}
+  try {
+    const rows = await sql`
+      SELECT
+        AVG(
+          EXTRACT(EPOCH FROM (sf.created_at - s.created_at)) / 86400.0
+        ) AS avg_days
+      FROM scans s
+      JOIN scan_feedback sf ON sf.scan_id = s.id
+      JOIN repos r ON s.repo_id = r.id
+      WHERE
+        s.verdict = 'TRUE_POSITIVE'
+        AND sf.correct_verdict = 'FALSE_POSITIVE'
+        AND (
+          r.id IN (
+            SELECT r2.id FROM repos r2
+            JOIN users u ON r2.user_id = u.id
+            WHERE u.github_id = ${githubId}
+          )
+          OR (r.installation_id IS NOT NULL AND EXISTS (
+            SELECT 1 FROM installations i
+            WHERE i.installation_id = r.installation_id
+              AND i.account_login = ${username}
+              AND i.deleted_at IS NULL
+          ))
         )
-        OR (r.installation_id IS NOT NULL AND EXISTS (
-          SELECT 1 FROM installations i
-          WHERE i.installation_id = r.installation_id
-            AND i.account_login = ${username}
-            AND i.deleted_at IS NULL
-        ))
-      )
-  `;
-  const avg = parseFloat((rows[0] as any)?.avg_days);
-  return Number.isFinite(avg) ? Math.round(avg * 10) / 10 : null;
+    `;
+    const avg = parseFloat((rows[0] as any)?.avg_days);
+    return Number.isFinite(avg) ? Math.round(avg * 10) / 10 : null;
+  } catch {
+    return null;
+  }
 }
 
 async function hasConnectedRepos(githubId: number, username: string): Promise<boolean> {
