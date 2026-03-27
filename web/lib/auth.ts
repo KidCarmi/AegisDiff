@@ -7,6 +7,7 @@
 import type { NextAuthOptions } from "next-auth";
 import GitHubProvider from "next-auth/providers/github";
 import { sql } from "./db";
+import { sendWelcomeEmail } from "./email";
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -32,14 +33,19 @@ export const authOptions: NextAuthOptions = {
       const username = (profile as any).login as string;
       const email = user.email ?? null;
 
-      // Upsert user record
-      await sql`
+      // Upsert user record — detect first-ever sign-in to send welcome email
+      const result = await sql`
         INSERT INTO users (github_id, username, email)
         VALUES (${githubId}, ${username}, ${email})
         ON CONFLICT (github_id) DO UPDATE
           SET username = EXCLUDED.username,
               email    = COALESCE(EXCLUDED.email, users.email)
+        RETURNING (xmax = 0) AS is_new_user
       `;
+      const isNewUser = (result[0] as any)?.is_new_user === true;
+      if (isNewUser && email) {
+        sendWelcomeEmail(email, username); // fire-and-forget
+      }
 
       return true;
     },

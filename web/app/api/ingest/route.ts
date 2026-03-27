@@ -17,6 +17,7 @@ import { createHash, createHmac } from "crypto";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { sql } from "../../../lib/db";
 import type { IngestPayload } from "../../../lib/types";
+import { sendScanAlertEmail } from "../../../lib/email";
 
 const ALLOWED_VERDICTS = new Set(["TRUE_POSITIVE", "FALSE_POSITIVE", "NEEDS_REVIEW", "ERROR"]);
 const SEVERITY_RANK: Record<string, number> = {
@@ -299,6 +300,36 @@ export async function POST(req: NextRequest) {
     // GitHub Issues — only on TRUE_POSITIVE, only if GitHub App installed
     if (primary.verdict === "TRUE_POSITIVE" && meta.auto_github_issue && meta.installation_id) {
       createGitHubIssue(meta.installation_id, owner, name, primary);
+    }
+
+    // Email fallback — fire when no webhooks configured and finding is TRUE_POSITIVE
+    if (
+      primary.verdict === "TRUE_POSITIVE" &&
+      !meta.slack_webhook_url &&
+      !meta.discord_webhook_url &&
+      !meta.teams_webhook_url
+    ) {
+      try {
+        const userRows = await sql`
+          SELECT u.email, u.username FROM users u
+          JOIN repos r ON r.user_id = u.id
+          WHERE r.id = ${repoId} AND u.email IS NOT NULL
+          LIMIT 1
+        `;
+        if (userRows.length > 0) {
+          const { email, username } = userRows[0] as any;
+          sendScanAlertEmail(email, username, owner, name, {
+            title: primary.title ?? null,
+            severity: primary.severity ?? null,
+            cweId: primary.cwe_id ?? null,
+            prNumber: primary.pr_number ?? null,
+            prUrl: primary.pr_url ?? null,
+            confidence: primary.confidence ?? null,
+          });
+        }
+      } catch (err) {
+        console.error("[ingest] Email alert failed (non-fatal):", err);
+      }
     }
   }
 

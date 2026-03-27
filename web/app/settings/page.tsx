@@ -4,6 +4,7 @@ import { authOptions } from "../../lib/auth";
 import { sql } from "../../lib/db";
 import { SettingsForm } from "./SettingsForm";
 import { ApiKeySection } from "./ApiKeySection";
+import { DeleteAccountButton } from "../../components/DeleteAccountButton";
 
 export default async function SettingsPage() {
   const session = await getServerSession(authOptions);
@@ -159,13 +160,27 @@ export default async function SettingsPage() {
       </section>
 
       {/* Privacy */}
-      <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-gray-800 mb-2">Privacy</h2>
-        <p className="text-sm text-gray-500">
+      <section className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-6 shadow-sm">
+        <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-2">Privacy</h2>
+        <p className="text-sm text-gray-500 dark:text-gray-400">
           AegisDiff operates on a <strong>zero code egress</strong> model. Your source code
           never leaves GitHub&apos;s infrastructure. Only scan metadata (verdict, severity,
           confidence) is sent to this dashboard — never code, diffs, or evidence quotes.
         </p>
+        <div className="mt-3 flex gap-3 text-xs text-gray-400 dark:text-gray-500">
+          <a href="/privacy" className="hover:text-brand-blue hover:underline">Privacy Policy</a>
+          <span>·</span>
+          <a href="/terms" className="hover:text-brand-blue hover:underline">Terms of Service</a>
+        </div>
+      </section>
+
+      {/* Danger Zone */}
+      <section className="rounded-lg border border-red-200 dark:border-red-900 bg-white dark:bg-gray-900 p-6 shadow-sm">
+        <h2 className="text-lg font-semibold text-red-700 dark:text-red-400 mb-1">Danger Zone</h2>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+          Permanently delete your account and all associated data. This cannot be undone.
+        </p>
+        <DeleteAccountButton />
       </section>
     </div>
   );
