@@ -22,8 +22,7 @@ repository_dispatch → AegisDiff Engine (GitHub Actions on our repo)
     │
     ├── Fetch diff via GitHub App token
     ├── AST parse → sink/source/data-flow extraction
-    ├── Per-file chunked analysis (one verdict per changed file)
-    ├── aegisdiff-ignore comments → suppressed without LLM call
+    │   (Python, JS, TS, Go, Java, Ruby, PHP)
     ├── Gemini 1.5 Pro (primary) ──[fail]──▶ Groq Llama-3 (fallback)
     │
     ├── Inline PR review comment on the exact vulnerable line
@@ -60,7 +59,7 @@ repository_dispatch → AegisDiff Engine (GitHub Actions on our repo)
 
 | Resource | Free tier |
 |---|---|
-| Scans | 50 per repo per day (platform AI keys) |
+| Scans | 100 per repo per day (platform AI keys) |
 | Repos | Unlimited |
 | Scan history | 30 days |
 | Webhooks | Slack, Discord, MS Teams |
@@ -75,7 +74,7 @@ repository_dispatch → AegisDiff Engine (GitHub Actions on our repo)
 |---|---|---|
 | Compute | GitHub Actions (AegisDiff's own repo, public = unlimited) | $0 |
 | Primary AI | Google Gemini 1.5 Pro | Free tier: 1,500 req/day |
-| Fallback AI | Groq Llama-3.3-70b | Free tier: 14,400 req/day |
+| Fallback AI | Groq Llama-3.3-70b (4-key pool) | Free tier: ~57,600 req/day |
 | Webhook handler | Vercel (Next.js 14) | Free tier: unlimited |
 | Database | Neon PostgreSQL (serverless) | Free tier: 0.5 GB |
 | Auth | NextAuth.js + GitHub OAuth + GitHub App | Free |
@@ -114,29 +113,14 @@ No separate role assignments. If you have write access on GitHub, you have it he
 
 ## Analysis Pipeline
 
-### Per-File Chunked Analysis (Phase 3)
-Large diffs are split by `diff --git` header and analyzed independently.
-Each file gets its own verdict. The worst finding is selected as the PR verdict.
-Accurate per-file line numbers for inline comments.
-
-### Inline PR Review Comments (Phase 2)
-TRUE_POSITIVE findings are posted as inline comments pinned to the exact
+### Inline PR Review Comments
+TRUE_POSITIVE findings are posted as inline review comments pinned to the exact
 vulnerable line, not just a top-level comment. The top-level comment becomes
 a summary (verdict + severity + CWE).
 
-### `aegisdiff-ignore` Suppression (Phase 4)
-```python
-# aegisdiff-ignore: CWE-89 reason: test-only fixture
-cursor.execute(f"SELECT * FROM {table}")
-```
-Add a comment on or above any sink. AegisDiff short-circuits to FALSE_POSITIVE
-without making an LLM call. Standard SAST workflow.
-
-### Feedback Loop (Phase 5)
-Dashboard shows 👍 / 👎 buttons on each scan card (repo:developer+).
-- 👍 on a TRUE_POSITIVE → marks as false positive, auto-adds to ignore rules
-- 👎 on a FALSE_POSITIVE → marks as missed finding
-All corrections written to audit log.
+### Multi-Language AST Analysis
+Sink/source detection across Python, JavaScript, TypeScript, Go, Java, Ruby,
+and PHP. Each language has tailored dangerous-call patterns and sanitizer checks.
 
 ### AI Failover & Context Trimming
 
@@ -191,7 +175,7 @@ The AI follows a strict 5-step analysis protocol — **disprove before confirmin
 ```bash
 # Python engine
 pip install -e .[dev]
-pytest                              # 63 tests, ~0.4s
+pytest                              # 105 tests, ~0.5s
 ruff check aegisdiff/               # Lint (CI gate)
 ruff format aegisdiff/              # Format
 
@@ -210,26 +194,28 @@ npm run build                       # Production build check
 
 ### ✅ Phase 0 — Platform Key Distribution
 Users need zero secrets. Runners exchange OIDC tokens for platform AI keys
-at `/api/llm-token`. Rate-limited at 50 scans/day per repo on the free tier.
-User-provided keys always win and bypass limits.
+at `/api/llm-token`. Rate-limited at 100 scans/day per repo on the free tier.
+4-key Groq pool (~57,600 req/day capacity). User-provided keys always win.
 
-### ✅ Phase 1 — RBAC
+### ✅ Phase 1 — RBAC + Admin Panel
 Role-based access derived from GitHub org/repo permissions. Org owners see
-all repos. Admins configure. Developers view and give feedback. Platform admin
-panel for the operator.
+all repos. Admins configure. Platform admin panel with Overview / Users /
+Rate Limits tabs. Admin link in navbar (platform:admin only).
 
 ### ✅ Phase 2 — Inline PR Review Comments
 Findings pinned to the exact vulnerable line, not just a top-level PR comment.
+Summary comment shows verdict + severity + CWE. Both entrypoints (manual workflow
+and GitHub App) post inline review comments.
 
-### ✅ Phase 3 — Per-File Chunked Analysis
+### Phase 3 — Per-File Chunked Analysis
 One verdict per changed file. Eliminates the "one verdict for 20 files" problem.
 Aggregated by severity: worst finding becomes the PR verdict.
 
-### ✅ Phase 4 — `aegisdiff-ignore` Inline Suppression
+### Phase 4 — `aegisdiff-ignore` Inline Suppression
 `# aegisdiff-ignore: CWE-89 reason: test-only` — standard SAST workflow.
 Suppressed sinks skip the LLM call entirely.
 
-### ✅ Phase 5 — Feedback Loop
+### Phase 5 — Feedback Loop
 👍 / 👎 buttons in dashboard. FALSE_POSITIVE feedback auto-adds to ignore rules.
 All corrections in audit log.
 

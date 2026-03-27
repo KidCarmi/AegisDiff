@@ -114,7 +114,7 @@ Never trust a role claim from the client — always re-resolve from GitHub API.
 ```bash
 # Python engine
 pip install -e .[dev]           # Install with dev dependencies
-pytest                          # Run all tests (63 tests, ~0.4s)
+pytest                          # Run all tests (105 tests, ~0.5s)
 pytest tests/test_orchestrator.py -v
 ruff check aegisdiff/           # Lint (CI gate — must pass)
 ruff format aegisdiff/          # Format
@@ -150,16 +150,26 @@ npm run build                   # Production build
 | `aegisdiff/llm/orchestrator.py` | Failover + retry + adaptive 413 trimming |
 | `aegisdiff/llm/providers/groq.py` | Groq (max_context_tokens = 5,500) |
 | `aegisdiff/llm/providers/gemini.py` | Gemini (max_context_tokens = 900k) |
-| `aegisdiff/code_context/extractor.py` | AST sink/source detection |
+| `aegisdiff/code_context/extractor.py` | AST sink/source detection (Python/JS/TS/Go/Java/Ruby/PHP) |
 | `aegisdiff/triage/prompts.py` | Cynical AppSec system prompt |
 | `aegisdiff/triage/verdicts.py` | Verdict parsing + calibration rules |
-| `aegisdiff/entrypoint.py` | OIDC auth + platform key fetch + PR comment |
-| `aegisdiff/config.py` | All env var loading |
-| `.github/workflows/aegisdiff.yml` | User-facing triage workflow |
+| `aegisdiff/entrypoint.py` | OIDC auth + platform key fetch + inline PR comment |
+| `aegisdiff/app_entrypoint.py` | GitHub App path entrypoint (mirrors entrypoint.py) |
+| `aegisdiff/github/client.py` | GitHub API: PR comments + inline review comments |
+| `aegisdiff/github/app_client.py` | GitHub App installation token + diff fetch + review |
+| `aegisdiff/sentry.py` | Sentry init helper (no-op without SENTRY_DSN) |
+| `aegisdiff/config.py` | All env var loading (incl. GROQ_API_KEY_2/3/4) |
+| `.github/workflows/aegisdiff.yml` | User-facing triage workflow (manual setup path) |
+| `.github/workflows/aegisdiff-app.yml` | GitHub App path workflow (repository_dispatch) |
 | `web/app/api/ingest/route.ts` | Receives scan metadata, fires webhooks |
-| `web/app/api/llm-token/route.ts` | Platform key distribution (Phase 0) |
+| `web/app/api/llm-token/route.ts` | Platform key distribution — 100 scans/day limit |
+| `web/app/api/webhooks/github/route.ts` | GitHub App webhook handler (HMAC verify + event routing) |
+| `web/app/api/repos/[o]/[n]/setup-workflow/route.ts` | One-click workflow commit via GitHub App token |
+| `web/app/admin/page.tsx` | Platform admin dashboard (Overview/Users/Rate Limits tabs) |
 | `web/lib/rbac.ts` | Role resolution from GitHub API (Phase 1) |
-| `web/instrumentation.ts` | Auto-applies DB migrations on cold start |
+| `web/lib/github-app.ts` | GitHub App JWT + installation token helpers |
+| `web/middleware.ts` | Route protection — admin routes require platform:admin |
+| `web/instrumentation.ts` | Sentry init + auto-applies DB migrations on cold start |
 | `web/lib/db.ts` | Neon client + schema SQL |
 
 ## Dashboard API Surface
@@ -213,76 +223,26 @@ Note: **No `memberships` table.** RBAC is resolved from GitHub API at runtime.
 
 Work through phases in order. All tests must pass before starting the next phase.
 
-### Phase 0 — Platform Key Distribution
+### ✅ Phase 0 — Platform Key Distribution (COMPLETE)
 
-**Goal:** Users need zero secrets — not even `GEMINI_API_KEY`. The engine
-fetches platform LLM keys from `/api/llm-token` via OIDC. LLM calls still
-made FROM the user's runner. Code never leaves GitHub.
+Users need zero secrets. The engine fetches platform LLM keys from `/api/llm-token`
+via OIDC. Rate limit: **100 scans/day** per repo. User-provided keys always win.
 
-**New Vercel env vars (operator sets these once):**
-- `PLATFORM_GEMINI_API_KEY` — operator's Gemini key
-- `PLATFORM_GROQ_API_KEY` — operator's Groq key
-- `PLATFORM_ADMIN_GITHUB_IDS` — comma-separated GitHub user IDs with admin access
+Vercel env vars required: `PLATFORM_GEMINI_API_KEY`, `PLATFORM_GROQ_API_KEY`,
+`PLATFORM_GROQ_API_KEY_2/3/4` (4-key pool), `PLATFORM_ADMIN_GITHUB_IDS`.
 
-**`web/app/api/llm-token/route.ts`:**
-- `GET` with `Authorization: Bearer <oidc-jwt>`
-- Call `verifyOIDC(token)` → get `repo` claim
-- Count scans for this repo in last 24h from `scans` table
-- If count ≥ 50 → return 429 `{ error: "Rate limit: 50 scans/day on free tier" }`
-- Return `{ gemini_key, groq_key, expires_at }` (exp = 5 min from now)
-- Write to `audit_log`: action `"llm_key_issued"`, detail = repo
+### ✅ Phase 1 — RBAC (COMPLETE)
 
-**`aegisdiff/entrypoint.py` changes:**
-- Add `_fetch_platform_keys(ingest_url, oidc_token) -> dict`
-- In `main()`: before the `sys.exit(1)` on missing keys, try platform keys
-- If platform keys are available, build providers with them
-- User-provided keys always checked first — skip platform fetch if set
-- On 429 from platform: log clearly, exit 1 with actionable message
+GitHub-derived roles, middleware route protection, platform admin panel.
+Admin panel has 3 tabs: Overview (stats + top repos + audit log), Users (list),
+Rate Limits (override form). Admin link in NavBar shown only to platform:admin.
 
-**`aegisdiff/config.py`:** No change needed.
+### ✅ Phase 2 — Inline PR Review Comments (COMPLETE)
 
-**`.github/workflows/aegisdiff.yml`:** Remove `GEMINI_API_KEY`/`GROQ_API_KEY`
-from required secrets documentation. Keep as optional override.
-
-**Tests (`tests/test_entrypoint.py`):**
-- User keys present → `_fetch_platform_keys` never called
-- No user keys + ingest URL → `_fetch_platform_keys` called with OIDC token
-- Platform returns 429 → `sys.exit(1)` with clear message
-- Platform returns keys → providers built, scan proceeds
-
-### Phase 1 — RBAC
-
-**Goal:** Role-based access control derived from GitHub permissions. Platform
-admin panel. No manual role assignments — GitHub is the source of truth.
-
-**`web/lib/rbac.ts`:**
-- `resolveRole(session, owner, repo?)` — see RBAC Model section above
-- `requireRole(minRole)` — Next.js middleware helper, returns 403 if insufficient
-- Cache resolved role in JWT claims (re-verify on session refresh)
-
-**`web/middleware.ts`:** Route protection table (see RBAC Model section).
-
-**`web/app/admin/page.tsx`:** Platform admin dashboard:
-- Total scans (today / 7d / 30d)
-- Top repos by scan count
-- Rate-limited repos list
-- User list with role + last active
-- Override rate limit form
-
-**API changes:** Add `requireRole` checks to all mutation endpoints.
-
-**Tests:** Mock GitHub API responses, verify role resolution and route protection.
-
-### Phase 2 — Inline PR Review Comments
-
-**Goal:** Findings posted as inline comments on the exact vulnerable line.
-
-- `aegisdiff/github/client.py` — add `create_review(pr, commit_sha, comments[])`
-- `aegisdiff/triage/verdicts.py` — add `line_number: Optional[int]`
-- `aegisdiff/code_context/extractor.py` — ensure sink line number always set
-- `aegisdiff/entrypoint.py` — use review when line number known; top-level fallback
-- Top-level comment becomes a summary only (verdict + severity + CWE)
-- Inline comment contains evidence quote + remediation
+TRUE_POSITIVE findings posted as inline review comments on the exact vulnerable
+line. Top-level comment is a summary only. Both `entrypoint.py` (manual path)
+and `app_entrypoint.py` (GitHub App path) use inline comments. 25 tests added
+in `tests/test_pr_comment.py`.
 
 ### Phase 3 — Per-Hunk Analysis
 
