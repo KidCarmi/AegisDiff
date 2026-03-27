@@ -1,21 +1,26 @@
-"""Google Gemini 1.5 Pro provider — primary LLM engine."""
+"""Google Gemini 2.0 Flash provider — primary LLM engine."""
 
 from __future__ import annotations
 
+import logging
 import time
 
 import httpx
 
 from .base import LLMProvider, LLMRequest, LLMResponse
 
+# gemini-1.5-pro-latest was deprecated; gemini-2.0-flash is the current
+# recommended model — faster, same 1M context window, free tier available.
 GEMINI_API_URL = (
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent"
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 )
+
+logger = logging.getLogger(__name__)
 
 
 class GeminiProvider(LLMProvider):
     name = "gemini"
-    model = "gemini-1.5-pro-latest"
+    model = "gemini-2.0-flash"
     max_context_tokens = 900_000  # Leave 100k headroom below the 1M limit
 
     def __init__(self, api_key: str) -> None:
@@ -37,6 +42,13 @@ class GeminiProvider(LLMProvider):
             json=payload,
             timeout=60.0,
         )
+        if not resp.is_success:
+            try:
+                err_body = resp.json()
+                err_msg = str(err_body.get("error", {}).get("message", resp.text[:300]))
+            except Exception:
+                err_msg = resp.text[:300]
+            logger.warning("Gemini HTTP %d: %s", resp.status_code, err_msg)
         resp.raise_for_status()
         data = resp.json()
         latency = (time.monotonic() - t0) * 1000

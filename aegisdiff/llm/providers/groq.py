@@ -61,21 +61,30 @@ class GroqProvider(LLMProvider):
                 err_msg = resp.text[:300]
             logger.warning("Groq HTTP %d: %s", resp.status_code, err_msg)
 
-            if resp.status_code == 400 and any(
-                phrase in err_msg.lower() for phrase in _GROQ_TOO_LARGE_PHRASES
-            ):
-                # Mutate a synthetic 413 so the orchestrator shrinks context
-                synthetic = httpx.Response(
-                    status_code=413,
-                    headers=resp.headers,
-                    content=resp.content,
-                    request=resp.request,
+            if resp.status_code == 400:
+                # Rewrite to 413 when Groq signals context too large so the
+                # orchestrator's adaptive trimming kicks in.
+                # Also catch the case where Groq returns a plain 400 with no
+                # matching phrase — still rewrite to 413 as a safe fallback
+                # because a non-413 400 from Groq is almost always a size issue.
+                is_size_error = any(
+                    phrase in err_msg.lower() for phrase in _GROQ_TOO_LARGE_PHRASES
                 )
-                raise httpx.HTTPStatusError(
-                    f"Groq 400 rewritten to 413 (context too large): {err_msg}",
-                    request=resp.request,
-                    response=synthetic,
-                )
+                if is_size_error or not err_msg:
+                    synthetic = httpx.Response(
+                        status_code=413,
+                        headers=resp.headers,
+                        content=resp.content,
+                        request=resp.request,
+                    )
+                    raise httpx.HTTPStatusError(
+                        f"Groq 400 rewritten to 413 (context too large): {err_msg}",
+                        request=resp.request,
+                        response=synthetic,
+                    )
+                # Known non-size 400 (e.g. invalid model, bad request format) —
+                # log it clearly and let raise_for_status() produce a non-retryable error
+                logger.error("Groq 400 (non-size): %s", err_msg)
 
         resp.raise_for_status()
         data = resp.json()
