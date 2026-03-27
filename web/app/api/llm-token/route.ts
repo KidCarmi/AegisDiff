@@ -78,6 +78,15 @@ export async function GET(req: NextRequest) {
 
   // ── 3. Check platform keys are configured ─────────────────────────────
   const geminiKey = process.env.PLATFORM_GEMINI_API_KEY ?? "";
+  const cerebrasKeys = [
+    process.env.PLATFORM_CEREBRAS_API_KEY,
+    process.env.PLATFORM_CEREBRAS_API_KEY_2,
+    process.env.PLATFORM_CEREBRAS_API_KEY_3,
+  ].filter(Boolean) as string[];
+  const sambanovaKeys = [
+    process.env.PLATFORM_SAMBANOVA_API_KEY,
+    process.env.PLATFORM_SAMBANOVA_API_KEY_2,
+  ].filter(Boolean) as string[];
   const groqKeys = [
     process.env.PLATFORM_GROQ_API_KEY,
     process.env.PLATFORM_GROQ_API_KEY_2,
@@ -87,7 +96,8 @@ export async function GET(req: NextRequest) {
     process.env.PLATFORM_GROQ_API_KEY_6,
   ].filter(Boolean) as string[];
 
-  if (!geminiKey && groqKeys.length === 0) {
+  const hasAnyKey = geminiKey || cerebrasKeys.length > 0 || sambanovaKeys.length > 0 || groqKeys.length > 0;
+  if (!hasAnyKey) {
     return NextResponse.json(
       { error: "Platform AI keys not configured — contact support." },
       { status: 503 }
@@ -110,10 +120,12 @@ export async function GET(req: NextRequest) {
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
 
   return NextResponse.json({
-    gemini_key:  geminiKey || null,
-    groq_keys:   groqKeys,
-    expires_at:  expiresAt,
-    scans_today: scansToday,
-    limit:       effectiveLimit,
+    gemini_key:     geminiKey || null,
+    cerebras_keys:  cerebrasKeys,
+    sambanova_keys: sambanovaKeys,
+    groq_keys:      groqKeys,
+    expires_at:     expiresAt,
+    scans_today:    scansToday,
+    limit:          effectiveLimit,
   });
 }

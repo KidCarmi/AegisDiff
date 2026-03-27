@@ -169,8 +169,10 @@ def main() -> None:
         format_verdict_comment,
     )
     from .llm.orchestrator import LLMOrchestrator
+    from .llm.providers.cerebras import CerebrasProvider
     from .llm.providers.gemini import GeminiProvider
     from .llm.providers.groq import GroqProvider
+    from .llm.providers.sambanova import SambaNovProvider
     from .triage.engine import TriageEngine
     from .triage.verdicts import VerdictType
 
@@ -178,6 +180,23 @@ def main() -> None:
 
     cfg = load_config()
 
+    cerebras_keys = [
+        k
+        for k in [
+            cfg.cerebras_api_key,
+            cfg.cerebras_api_key_2,
+            cfg.cerebras_api_key_3,
+        ]
+        if k
+    ]
+    sambanova_keys = [
+        k
+        for k in [
+            cfg.sambanova_api_key,
+            cfg.sambanova_api_key_2,
+        ]
+        if k
+    ]
     groq_keys = [
         k
         for k in [
@@ -193,30 +212,28 @@ def main() -> None:
     gemini_key = cfg.gemini_api_key
 
     # ── Build provider list ────────────────────────────────────────────────
-    # Priority: user keys first (unlimited), then platform keys via OIDC
-    # (100 scans/day free). Platform keys are ALWAYS appended as fallback
-    # even when user keys are set — this ensures scans work even when user
-    # keys expire, are revoked, or hit quota.
-    # Primary Groq model — try this first with all available keys.
-    _GROQ_PRIMARY = "llama-3.3-70b-versatile"
-    # Fallback Groq model — different family, survives primary model deprecation.
-    _GROQ_FALLBACK = "llama-3.1-8b-instant"
-
+    # Priority order (best → last resort):
+    #   1. Cerebras  — fast, free, no data retention
+    #   2. SambaNova — enterprise-grade, free, no data retention
+    #   3. Groq      — kept as legacy fallback (currently restricted)
+    #   4. Gemini    — Google AI Studio fallback
+    # Platform keys (via OIDC) are appended after user keys for each provider.
     providers = []
+    for i, key in enumerate(cerebras_keys, start=1):
+        providers.append(CerebrasProvider(key))
+        logger.info("Provider: Cerebras llama-3.3-70b (user key %d/%d)", i, len(cerebras_keys))
+    for i, key in enumerate(sambanova_keys, start=1):
+        providers.append(SambaNovProvider(key))
+        logger.info("Provider: SambaNova llama-3.3-70b (user key %d/%d)", i, len(sambanova_keys))
+    for i, key in enumerate(groq_keys, start=1):
+        providers.append(GroqProvider(key))
+        logger.info("Provider: Groq llama-3.3-70b (user key %d/%d)", i, len(groq_keys))
     if gemini_key:
         providers.append(GeminiProvider(gemini_key))
         logger.info("Provider: Gemini 2.0 Flash (user key)")
-    for i, key in enumerate(groq_keys, start=1):
-        providers.append(GroqProvider(key, model=_GROQ_PRIMARY))
-        logger.info("Provider: Groq %s (user key %d/%d)", _GROQ_PRIMARY, i, len(groq_keys))
-    # Append the same user keys again with the fallback model — if primary model
-    # is deprecated/unavailable, the fallback model on the same key will be tried.
-    for i, key in enumerate(groq_keys, start=1):
-        providers.append(GroqProvider(key, model=_GROQ_FALLBACK))
-        logger.info("Provider: Groq %s fallback (user %d/%d)", _GROQ_FALLBACK, i, len(groq_keys))
 
-    # Always attempt to fetch platform keys via OIDC and append as fallback.
-    # Non-fatal if OIDC is unavailable (local runs, forks without secrets).
+    # Platform keys via OIDC — always appended as fallback even when user keys
+    # are set, ensuring scans work if user keys expire, are revoked, or hit quota.
     oidc = _get_oidc_token()
     if oidc and cfg.aegisdiff_ingest_url:
         if not providers:
@@ -224,25 +241,29 @@ def main() -> None:
         else:
             logger.info("Appending platform keys as fallback providers via OIDC")
         platform = _fetch_platform_keys(cfg.aegisdiff_ingest_url, oidc)
-        platform_gemini = platform.get("gemini_key", "") or ""
+        platform_cerebras = [k for k in platform.get("cerebras_keys", []) if k]
+        platform_sambanova = [k for k in platform.get("sambanova_keys", []) if k]
         platform_groq = [k for k in platform.get("groq_keys", []) if k]
         if not platform_groq and platform.get("groq_key"):
             platform_groq = [platform["groq_key"]]
+        platform_gemini = platform.get("gemini_key", "") or ""
+        for i, key in enumerate(platform_cerebras, start=1):
+            providers.append(CerebrasProvider(key))
+            logger.info("Provider: Cerebras (platform %d/%d)", i, len(platform_cerebras))
+        for i, key in enumerate(platform_sambanova, start=1):
+            providers.append(SambaNovProvider(key))
+            logger.info("Provider: SambaNova (platform %d/%d)", i, len(platform_sambanova))
+        for i, key in enumerate(platform_groq, start=1):
+            providers.append(GroqProvider(key))
+            logger.info("Provider: Groq (platform %d/%d)", i, len(platform_groq))
         if platform_gemini:
             providers.append(GeminiProvider(platform_gemini))
             logger.info("Provider: Gemini 2.0 Flash (platform key)")
-        for i, key in enumerate(platform_groq, start=1):
-            providers.append(GroqProvider(key, model=_GROQ_PRIMARY))
-            logger.info("Provider: Groq %s (platform %d/%d)", _GROQ_PRIMARY, i, len(platform_groq))
-        for i, key in enumerate(platform_groq, start=1):
-            providers.append(GroqProvider(key, model=_GROQ_FALLBACK))
-            n = len(platform_groq)
-            logger.info("Provider: Groq %s fallback (platform %d/%d)", _GROQ_FALLBACK, i, n)
 
     if not providers:
         logger.error(
             "No LLM keys available. Either:\n"
-            "  1. Add GEMINI_API_KEY or GROQ_API_KEY to your repo secrets (unlimited), or\n"
+            "  1. Add CEREBRAS_API_KEY or SAMBANOVA_API_KEY to your repo secrets, or\n"
             "  2. Ensure AEGISDIFF_INGEST_URL is set (platform keys, 100 scans/day free)."
         )
         sys.exit(1)

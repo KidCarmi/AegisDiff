@@ -75,10 +75,13 @@ jobs:
       - name: Run canary scan (sample.diff — cmd injection + path traversal)
         continue-on-error: true   # Metric only — never blocks CI
         env:
-          GEMINI_API_KEY:       ${{ secrets.GEMINI_API_KEY }}
+          CEREBRAS_API_KEY:     ${{ secrets.CEREBRAS_API_KEY }}
+          CEREBRAS_API_KEY_2:   ${{ secrets.CEREBRAS_API_KEY_2 }}
+          CEREBRAS_API_KEY_3:   ${{ secrets.CEREBRAS_API_KEY_3 }}
+          SAMBANOVA_API_KEY:    ${{ secrets.SAMBANOVA_API_KEY }}
+          SAMBANOVA_API_KEY_2:  ${{ secrets.SAMBANOVA_API_KEY_2 }}
           GROQ_API_KEY:         ${{ secrets.GROQ_API_KEY }}
-          GROQ_API_KEY_2:       ${{ secrets.GROQ_API_KEY_2 }}
-          GROQ_API_KEY_3:       ${{ secrets.GROQ_API_KEY_3 }}
+          GEMINI_API_KEY:       ${{ secrets.GEMINI_API_KEY }}
           COMMIT_SHA:           ${{ github.sha }}
           REPO:                 ${{ github.repository }}
           DIFF_PATH:            tests/fixtures/sample.diff
@@ -156,10 +159,13 @@ jobs:
         if: steps.diff.outputs.skip == 'false'
         continue-on-error: true   # Never block CI on triage failure
         env:
-          GEMINI_API_KEY:        ${{ secrets.GEMINI_API_KEY }}
+          CEREBRAS_API_KEY:      ${{ secrets.CEREBRAS_API_KEY }}
+          CEREBRAS_API_KEY_2:    ${{ secrets.CEREBRAS_API_KEY_2 }}
+          CEREBRAS_API_KEY_3:    ${{ secrets.CEREBRAS_API_KEY_3 }}
+          SAMBANOVA_API_KEY:     ${{ secrets.SAMBANOVA_API_KEY }}
+          SAMBANOVA_API_KEY_2:   ${{ secrets.SAMBANOVA_API_KEY_2 }}
           GROQ_API_KEY:          ${{ secrets.GROQ_API_KEY }}
-          GROQ_API_KEY_2:        ${{ secrets.GROQ_API_KEY_2 }}
-          GROQ_API_KEY_3:        ${{ secrets.GROQ_API_KEY_3 }}
+          GEMINI_API_KEY:        ${{ secrets.GEMINI_API_KEY }}
           GITHUB_TOKEN:          ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER:             ${{ github.event.pull_request.number || '' }}
           COMMIT_SHA:            ${{ github.sha }}
