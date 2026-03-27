@@ -8,7 +8,8 @@
  * directly — source code never reaches AegisDiff servers.
  *
  * Auth:   GitHub Actions OIDC JWT (audience: "aegisdiff")
- * Limit:  FREE_TIER_DAILY_LIMIT scans per repo per 24 h
+ * Limit:  FREE_TIER_DAILY_LIMIT scans per repo per 24 h (overridable
+ *         per-repo by platform admin via /api/admin/rate-limit)
  * Bypass: User's own GEMINI_API_KEY / GROQ_API_KEY — entrypoint skips
  *         this endpoint entirely when user keys are present.
  */
@@ -40,25 +41,33 @@ export async function GET(req: NextRequest) {
 
   const [owner, name] = repo.split("/");
 
-  // ── 2. Rate limit — count scans for this repo in the last 24 hours ─────
+  // ── 2. Rate limit — count scans + respect custom_daily_limit override ──
   const countRows = await sql`
-    SELECT COUNT(*) AS count
-    FROM scans s
-    JOIN repos r ON s.repo_id = r.id
+    SELECT
+      COUNT(s.id)              AS count,
+      r.custom_daily_limit     AS custom_limit
+    FROM repos r
+    LEFT JOIN scans s ON s.repo_id = r.id
+      AND s.created_at > NOW() - INTERVAL '24 hours'
     WHERE r.owner = ${owner}
       AND r.name  = ${name}
-      AND s.created_at > NOW() - INTERVAL '24 hours'
+    GROUP BY r.id, r.custom_daily_limit
   `;
   const scansToday = parseInt((countRows[0] as any)?.count ?? "0", 10);
+  const customLimit = (countRows[0] as any)?.custom_limit;
+  const effectiveLimit =
+    customLimit !== null && customLimit !== undefined
+      ? parseInt(customLimit, 10)
+      : FREE_TIER_DAILY_LIMIT;
 
-  if (scansToday >= FREE_TIER_DAILY_LIMIT) {
+  if (scansToday >= effectiveLimit) {
     return NextResponse.json(
       {
         error:
-          `Rate limit reached: ${FREE_TIER_DAILY_LIMIT} scans/day on the free tier. ` +
+          `Rate limit reached: ${effectiveLimit} scans/day. ` +
           `Add GEMINI_API_KEY or GROQ_API_KEY to your repo secrets for unlimited scans.`,
         scans_today: scansToday,
-        limit: FREE_TIER_DAILY_LIMIT,
+        limit: effectiveLimit,
       },
       { status: 429 }
     );
@@ -83,7 +92,6 @@ export async function GET(req: NextRequest) {
   }
 
   // ── 4. Audit log ───────────────────────────────────────────────────────
-  // Non-fatal — don't let a logging failure block the response
   sql`
     INSERT INTO audit_log (github_id, action, repo_owner, repo_name, details)
     VALUES (
@@ -91,7 +99,7 @@ export async function GET(req: NextRequest) {
       'llm_key_issued',
       ${owner},
       ${name},
-      ${JSON.stringify({ scans_today: scansToday, limit: FREE_TIER_DAILY_LIMIT })}
+      ${JSON.stringify({ scans_today: scansToday, limit: effectiveLimit })}
     )
   `.catch(() => {});
 
@@ -103,6 +111,6 @@ export async function GET(req: NextRequest) {
     groq_keys:   groqKeys,
     expires_at:  expiresAt,
     scans_today: scansToday,
-    limit:       FREE_TIER_DAILY_LIMIT,
+    limit:       effectiveLimit,
   });
 }
