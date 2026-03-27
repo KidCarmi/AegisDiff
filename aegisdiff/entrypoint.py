@@ -172,7 +172,7 @@ def main() -> None:
     from .llm.providers.cerebras import CerebrasProvider
     from .llm.providers.gemini import GeminiProvider
     from .llm.providers.groq import GroqProvider
-    from .llm.providers.sambanova import SambaNovProvider
+    from .llm.providers.openrouter import OpenRouterProvider
     from .triage.engine import TriageEngine
     from .triage.verdicts import VerdictType
 
@@ -189,11 +189,11 @@ def main() -> None:
         ]
         if k
     ]
-    sambanova_keys = [
+    openrouter_keys = [
         k
         for k in [
-            cfg.sambanova_api_key,
-            cfg.sambanova_api_key_2,
+            cfg.openrouter_api_key,
+            cfg.openrouter_api_key_2,
         ]
         if k
     ]
@@ -213,18 +213,18 @@ def main() -> None:
 
     # ── Build provider list ────────────────────────────────────────────────
     # Priority order (best → last resort):
-    #   1. Cerebras  — fast, free, no data retention
-    #   2. SambaNova — enterprise-grade, free, no data retention
-    #   3. Groq      — kept as legacy fallback (currently restricted)
-    #   4. Gemini    — Google AI Studio fallback
+    #   1. Cerebras    — fastest, truly free tier, no data retention
+    #   2. OpenRouter  — free ':free' models, no credits needed
+    #   3. Groq        — legacy fallback (currently org-restricted)
+    #   4. Gemini      — Google AI Studio fallback
     # Platform keys (via OIDC) are appended after user keys for each provider.
     providers = []
     for i, key in enumerate(cerebras_keys, start=1):
         providers.append(CerebrasProvider(key))
         logger.info("Provider: Cerebras llama-3.3-70b (user key %d/%d)", i, len(cerebras_keys))
-    for i, key in enumerate(sambanova_keys, start=1):
-        providers.append(SambaNovProvider(key))
-        logger.info("Provider: SambaNova llama-3.3-70b (user key %d/%d)", i, len(sambanova_keys))
+    for i, key in enumerate(openrouter_keys, start=1):
+        providers.append(OpenRouterProvider(key))
+        logger.info("Provider: OpenRouter :free (user key %d/%d)", i, len(openrouter_keys))
     for i, key in enumerate(groq_keys, start=1):
         providers.append(GroqProvider(key))
         logger.info("Provider: Groq llama-3.3-70b (user key %d/%d)", i, len(groq_keys))
@@ -242,7 +242,7 @@ def main() -> None:
             logger.info("Appending platform keys as fallback providers via OIDC")
         platform = _fetch_platform_keys(cfg.aegisdiff_ingest_url, oidc)
         platform_cerebras = [k for k in platform.get("cerebras_keys", []) if k]
-        platform_sambanova = [k for k in platform.get("sambanova_keys", []) if k]
+        platform_openrouter = [k for k in platform.get("openrouter_keys", []) if k]
         platform_groq = [k for k in platform.get("groq_keys", []) if k]
         if not platform_groq and platform.get("groq_key"):
             platform_groq = [platform["groq_key"]]
@@ -250,9 +250,9 @@ def main() -> None:
         for i, key in enumerate(platform_cerebras, start=1):
             providers.append(CerebrasProvider(key))
             logger.info("Provider: Cerebras (platform %d/%d)", i, len(platform_cerebras))
-        for i, key in enumerate(platform_sambanova, start=1):
-            providers.append(SambaNovProvider(key))
-            logger.info("Provider: SambaNova (platform %d/%d)", i, len(platform_sambanova))
+        for i, key in enumerate(platform_openrouter, start=1):
+            providers.append(OpenRouterProvider(key))
+            logger.info("Provider: OpenRouter (platform %d/%d)", i, len(platform_openrouter))
         for i, key in enumerate(platform_groq, start=1):
             providers.append(GroqProvider(key))
             logger.info("Provider: Groq (platform %d/%d)", i, len(platform_groq))
@@ -263,7 +263,7 @@ def main() -> None:
     if not providers:
         logger.error(
             "No LLM keys available. Either:\n"
-            "  1. Add CEREBRAS_API_KEY or SAMBANOVA_API_KEY to your repo secrets, or\n"
+            "  1. Add CEREBRAS_API_KEY or OPENROUTER_API_KEY to your repo secrets, or\n"
             "  2. Ensure AEGISDIFF_INGEST_URL is set (platform keys, 100 scans/day free)."
         )
         sys.exit(1)
