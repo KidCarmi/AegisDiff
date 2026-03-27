@@ -26,7 +26,15 @@ export async function GET(_req: NextRequest) {
       COUNT(s.id)            AS total_scans,
       MAX(s.created_at)      AS last_scan_at
     FROM users u
-    LEFT JOIN repos  r ON r.user_id = u.id
+    LEFT JOIN repos r ON (
+      r.user_id = u.id
+      OR (r.installation_id IS NOT NULL AND EXISTS (
+        SELECT 1 FROM installations i
+        WHERE i.installation_id = r.installation_id
+          AND i.account_login = u.username
+          AND i.deleted_at IS NULL
+      ))
+    )
     LEFT JOIN scans  s ON s.repo_id = r.id
     GROUP BY u.github_id, u.username, u.email, u.created_at
     ORDER BY last_scan_at DESC NULLS LAST
