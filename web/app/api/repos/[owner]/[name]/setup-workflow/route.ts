@@ -176,7 +176,13 @@ export async function POST(
     try {
       existingSha = await commitWorkflow(token);
     } catch (appErr: any) {
-      if (appErr?.message?.includes("403") || appErr?.message?.includes("not accessible")) {
+      const msg: string = appErr?.message ?? "";
+      const isAccessError =
+        msg.includes("403") ||
+        msg.includes("404") ||
+        msg.includes("not accessible") ||
+        msg.includes("Not Found");
+      if (isAccessError) {
         const userToken = (session as any)?.user?.accessToken as string | undefined;
         if (!userToken) throw appErr;
         console.warn("[setup-workflow] App token rejected, retrying with user OAuth token");
@@ -193,7 +199,7 @@ export async function POST(
     // "Resource not accessible by integration" means the GitHub App is missing
     // contents:write permission. Return a structured error so the UI can show
     // a targeted fix link instead of a raw API dump.
-    if (msg.includes("Resource not accessible by integration") || msg.includes("403")) {
+    if (msg.includes("Resource not accessible by integration") || msg.includes("403") || msg.includes("404")) {
       return NextResponse.json(
         {
           error: "GitHub App needs Contents (read & write) permission. Update the App permissions and re-accept the install.",
