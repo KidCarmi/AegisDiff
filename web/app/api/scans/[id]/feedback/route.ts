@@ -38,7 +38,7 @@ export async function POST(
 
     const body = await req.json().catch(() => null);
     const correct_verdict: VerdictType = body?.correct_verdict;
-    const reason: string | undefined = body?.reason;
+    const reason: string | undefined = typeof body?.reason === "string" ? body.reason : undefined;
 
     if (!correct_verdict || !VALID_VERDICTS.includes(correct_verdict)) {
       return NextResponse.json(

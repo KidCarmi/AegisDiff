@@ -39,7 +39,11 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const [owner, name] = repo.split("/");
+  const parts = repo.split("/");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    return NextResponse.json({ error: "Invalid OIDC repo claim" }, { status: 400 });
+  }
+  const [owner, name] = parts;
 
   // ── 2. Rate limit — count scans + respect custom_daily_limit override ──
   const countRows = await sql`
@@ -55,10 +59,9 @@ export async function GET(req: NextRequest) {
   `;
   const scansToday = parseInt((countRows[0] as any)?.count ?? "0", 10);
   const customLimit = (countRows[0] as any)?.custom_limit;
-  const effectiveLimit =
-    customLimit !== null && customLimit !== undefined
-      ? parseInt(customLimit, 10)
-      : FREE_TIER_DAILY_LIMIT;
+  const parsedCustom = customLimit != null ? parseInt(customLimit, 10) : NaN;
+  // Guard against NaN (non-numeric DB value) — always fall back to default
+  const effectiveLimit = Number.isFinite(parsedCustom) ? parsedCustom : FREE_TIER_DAILY_LIMIT;
 
   if (scansToday >= effectiveLimit) {
     return NextResponse.json(

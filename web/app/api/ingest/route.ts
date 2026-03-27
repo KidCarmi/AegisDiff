@@ -105,11 +105,12 @@ function buildTeamsPayload(owner: string, name: string, payload: IngestPayload) 
   };
 }
 
-async function fireWebhook(url: string, body: object, label: string) {
+function fireWebhook(url: string, body: object, label: string) {
   fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(5000),
   }).catch((e) => console.error(`[ingest] ${label} webhook failed:`, e));
 }
 
@@ -183,7 +184,11 @@ export async function POST(req: NextRequest) {
   // 1. OIDC path
   const oidcRepo = await verifyOIDC(token);
   if (oidcRepo) {
-    const [owner, name] = oidcRepo.split("/");
+    const parts = oidcRepo.split("/");
+    if (parts.length !== 2 || !parts[0] || !parts[1]) {
+      return NextResponse.json({ error: "Invalid OIDC repo claim" }, { status: 400 });
+    }
+    const [owner, name] = parts;
     const rows = await sql`SELECT id FROM repos WHERE owner = ${owner} AND name = ${name} LIMIT 1`;
     if (rows.length === 0) {
       const installRows = await sql`SELECT id FROM installations WHERE account_login = ${owner} AND deleted_at IS NULL LIMIT 1`;
@@ -272,7 +277,7 @@ export async function POST(req: NextRequest) {
         VALUES (${(githubIdRows[0] as any).github_id}, 'scan_ingested', ${meta.owner}, ${meta.name},
                 ${JSON.stringify({ count: payloads.length, verdict: primary.verdict, severity: primary.severity, cwe_id: primary.cwe_id })})`;
     }
-  } catch { /* audit failure is non-fatal */ }
+  } catch (err) { console.error("[ingest] Audit log failed (non-fatal):", err); }
 
   // Webhooks — fire once for the most severe actionable finding in the batch
   const notifiable = payloads
