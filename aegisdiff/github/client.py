@@ -129,6 +129,52 @@ class GitHubClient:
             logger.warning("Failed to post inline review comment: %s", e)
             return False
 
+    def upload_sarif(self, commit_sha: str, ref: str, sarif_b64: str) -> bool:
+        """
+        Upload a gzip+base64-encoded SARIF to GitHub Code Scanning.
+
+        Requires the GITHUB_TOKEN to have `security-events: write` permission
+        (or `public_repo` for public repositories).
+
+        Returns True on success, False on any error (non-fatal — caller continues).
+
+        Args:
+            commit_sha: Full 40-char SHA of the scanned commit.
+            ref:        Git ref, e.g. "refs/pull/42/head" or "refs/heads/main".
+            sarif_b64:  Output of aegisdiff.triage.sarif.encode_sarif().
+        """
+        url = f"{GITHUB_API_BASE}/repos/{self._repo}/code-scanning/sarifs"
+        payload = {
+            "commit_sha": commit_sha,
+            "ref": ref,
+            "sarif": sarif_b64,
+            "tool_name": "AegisDiff",
+        }
+        try:
+            resp = httpx.post(url, headers=self._headers, json=payload, timeout=20.0)
+            if resp.status_code == 403:
+                logger.warning(
+                    "SARIF upload skipped — token lacks security-events:write "
+                    "permission (add it to the workflow permissions block)"
+                )
+                return False
+            if resp.status_code == 404:
+                logger.warning(
+                    "SARIF upload skipped — Code Scanning not available for this repo "
+                    "(private repos need GitHub Advanced Security)"
+                )
+                return False
+            resp.raise_for_status()
+            logger.info(
+                "SARIF uploaded to GitHub Code Scanning (ref=%s, sha=%s)",
+                ref,
+                commit_sha[:7],
+            )
+            return True
+        except httpx.HTTPError as e:
+            logger.warning("SARIF upload failed (non-fatal): %s", e)
+            return False
+
     def post_commit_status(
         self,
         sha: str,

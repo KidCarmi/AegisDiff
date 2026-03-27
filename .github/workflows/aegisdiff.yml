@@ -28,7 +28,8 @@ permissions:
   contents: read
   pull-requests: write
   issues: write
-  id-token: write   # Required for GitHub Actions OIDC (zero-config dashboard auth)
+  id-token: write        # Required for GitHub Actions OIDC (zero-config dashboard auth)
+  security-events: write # Required for GitHub Code Scanning SARIF upload
 
 jobs:
   appsec-triage:

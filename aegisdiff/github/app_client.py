@@ -8,10 +8,13 @@ user-supplied GITHUB_TOKEN.
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Optional
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 class GitHubAppClient:
@@ -199,3 +202,54 @@ class GitHubAppClient:
                 json={"body": body},
                 timeout=15.0,
             ).raise_for_status()
+
+    def upload_sarif(
+        self,
+        installation_id: int,
+        owner: str,
+        repo: str,
+        commit_sha: str,
+        ref: str,
+        sarif_b64: str,
+    ) -> bool:
+        """
+        Upload a gzip+base64-encoded SARIF to GitHub Code Scanning via App token.
+
+        Requires the GitHub App to have the `security_events` permission.
+        Returns True on success, False on any error (non-fatal).
+        """
+        try:
+            token = self.get_installation_token(installation_id)
+            headers = {"Authorization": f"Bearer {token}", "Accept": self.ACCEPT}
+            resp = httpx.post(
+                f"{self.BASE_URL}/repos/{owner}/{repo}/code-scanning/sarifs",
+                headers=headers,
+                json={
+                    "commit_sha": commit_sha,
+                    "ref": ref,
+                    "sarif": sarif_b64,
+                    "tool_name": "AegisDiff",
+                },
+                timeout=20.0,
+            )
+            if resp.status_code == 403:
+                logger.warning("SARIF upload skipped — GitHub App lacks security_events permission")
+                return False
+            if resp.status_code == 404:
+                logger.warning(
+                    "SARIF upload skipped — Code Scanning not available for %s/%s",
+                    owner,
+                    repo,
+                )
+                return False
+            resp.raise_for_status()
+            logger.info(
+                "SARIF uploaded to GitHub Code Scanning (%s/%s sha=%s)",
+                owner,
+                repo,
+                commit_sha[:7],
+            )
+            return True
+        except Exception as exc:
+            logger.warning("SARIF upload failed (non-fatal): %s", exc)
+            return False

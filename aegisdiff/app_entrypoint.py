@@ -225,6 +225,22 @@ def main() -> None:
     )
     logger.info("PR comment posted to %s#%d", target_repo, pr_number)
 
+    # ── GitHub Code Scanning (SARIF upload) ──────────────────────────────────
+    # Upload findings so they appear in the Security tab. Non-fatal.
+    # Requires the GitHub App to have the `security_events` permission.
+    from .triage.sarif import build_sarif, encode_sarif
+
+    sarif_doc = build_sarif(all_verdicts, target_repo, commit_sha)
+    sarif_b64 = encode_sarif(sarif_doc)
+    app_client.upload_sarif(
+        installation_id,
+        owner,
+        repo_name,
+        commit_sha,
+        f"refs/pull/{pr_number}/head",
+        sarif_b64,
+    )
+
     # ── Send metadata to dashboard ────────────────────────────────────────────
     if ingest_url and ingest_token:
         ingest_payload = all_verdicts if len(all_verdicts) > 1 else verdict

@@ -11,6 +11,10 @@ on:
   repository_dispatch:
     types: [analyze_pr]
 
+# SARIF upload to GitHub Code Scanning uses the GitHub App installation token.
+# The App needs the `security_events` permission enabled in its GitHub App settings.
+# See: https://github.com/settings/apps/<your-app> → Permissions → Security Events → Read & Write
+
 jobs:
   analyze:
     name: Triage PR diff

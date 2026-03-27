@@ -295,6 +295,16 @@ def main() -> None:
         # Post commit status so result appears in the PR merge checklist
         status_state, status_desc = _verdict_to_status(verdict)
         client.post_commit_status(cfg.commit_sha, status_state, status_desc)
+
+        # ── GitHub Code Scanning (SARIF upload) ──────────────────────────
+        # Upload findings so they appear in the repo's Security tab.
+        # Non-fatal — skipped silently if token lacks security-events:write.
+        from .triage.sarif import build_sarif, encode_sarif
+
+        sarif_doc = build_sarif(all_verdicts, cfg.repo, cfg.commit_sha)
+        sarif_b64 = encode_sarif(sarif_doc)
+        ref = f"refs/pull/{cfg.pr_number}/head"
+        client.upload_sarif(cfg.commit_sha, ref, sarif_b64)
     else:
         # No PR context — print full comment to stdout (local / workflow_dispatch)
         comment_body = format_verdict_comment(
