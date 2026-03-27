@@ -8,6 +8,17 @@ import { isPlatformAdminSession } from "../lib/rbac";
 export const metadata: Metadata = {
   title: "AegisDiff — AppSec Triage",
   description: "Zero-cost autonomous security triage for your pull requests",
+  icons: {
+    icon: [
+      { url: "/favicon.png", type: "image/png" },
+    ],
+    apple: "/icon-192.png",
+  },
+  openGraph: {
+    title: "AegisDiff — AppSec Triage",
+    description: "Zero-cost autonomous security triage for your pull requests",
+    images: [{ url: "/og-image.png", width: 1200, height: 630 }],
+  },
 };
 
 export default async function RootLayout({

@@ -76,7 +76,8 @@ export function NavBar({ isAdmin = false }: { isAdmin?: boolean }) {
           href="/dashboard"
           className="flex items-center gap-2 text-xl font-bold text-gray-900 dark:text-gray-50 hover:opacity-80 transition-opacity"
         >
-          🛡️ <span>AegisDiff</span>
+          <img src="/icon-192.png" alt="" className="h-7 w-7 rounded-md" />
+          <span>AegisDiff</span>
         </a>
         <div className="flex items-center gap-1 text-sm">
           {NAV_LINKS.map(({ href, label }) => (
