@@ -97,6 +97,12 @@ export async function register() {
         created_at      TIMESTAMPTZ DEFAULT NOW()
       )`;
 
+    // ── Phase 8: SLA tracking indexes ─────────────────────────────────────────
+    // Speeds up SLA breach queries (verdict + severity + created_at filter)
+    await sql`CREATE INDEX IF NOT EXISTS scans_verdict_severity_idx ON scans(verdict, severity, created_at)`;
+    // Speeds up MTTF queries (feedback lookup by scan_id)
+    await sql`CREATE INDEX IF NOT EXISTS scan_feedback_scan_idx ON scan_feedback(scan_id)`;
+
     // ── Indexes ───────────────────────────────────────────────────────────
     await sql`CREATE INDEX IF NOT EXISTS installations_account_idx ON installations(account_login)`;
     await sql`CREATE INDEX IF NOT EXISTS repos_token_hash_idx      ON repos(token_hash)`;

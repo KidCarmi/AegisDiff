@@ -5,6 +5,7 @@ import { authOptions } from "../../lib/auth";
 import { sql } from "../../lib/db";
 import { TrendChart } from "../../components/TrendChart";
 import { DashboardTabs } from "../../components/DashboardTabs";
+import { SlaBreaches } from "../../components/SlaBreaches";
 import type { Scan } from "../../lib/types";
 
 async function getRecentScans(githubId: number, username: string): Promise<Scan[]> {
@@ -76,6 +77,40 @@ async function getScanStats(githubId: number, username: string) {
   };
 }
 
+/**
+ * Mean Time To Fix: average days from TRUE_POSITIVE scan to FALSE_POSITIVE feedback.
+ * Returns null when there is no feedback data yet.
+ */
+async function getMttfDays(githubId: number, username: string): Promise<number | null> {
+  const rows = await sql`
+    SELECT
+      AVG(
+        EXTRACT(EPOCH FROM (sf.created_at - s.created_at)) / 86400.0
+      ) AS avg_days
+    FROM scans s
+    JOIN scan_feedback sf ON sf.scan_id = s.id
+    JOIN repos r ON s.repo_id = r.id
+    WHERE
+      s.verdict = 'TRUE_POSITIVE'
+      AND sf.correct_verdict = 'FALSE_POSITIVE'
+      AND (
+        r.id IN (
+          SELECT r2.id FROM repos r2
+          JOIN users u ON r2.user_id = u.id
+          WHERE u.github_id = ${githubId}
+        )
+        OR (r.installation_id IS NOT NULL AND EXISTS (
+          SELECT 1 FROM installations i
+          WHERE i.installation_id = r.installation_id
+            AND i.account_login = ${username}
+            AND i.deleted_at IS NULL
+        ))
+      )
+  `;
+  const avg = parseFloat((rows[0] as any)?.avg_days);
+  return Number.isFinite(avg) ? Math.round(avg * 10) / 10 : null;
+}
+
 async function hasConnectedRepos(githubId: number, username: string): Promise<boolean> {
   const owned = await sql`
     SELECT 1 FROM repos r
@@ -100,10 +135,11 @@ export default async function DashboardPage() {
   const githubId = (session.user as any).githubId as number;
   const username = (session.user as any).username as string ?? session.user?.name ?? "";
 
-  const [scans, stats, connected] = await Promise.all([
+  const [scans, stats, connected, mttfDays] = await Promise.all([
     getRecentScans(githubId, username),
     getScanStats(githubId, username),
     hasConnectedRepos(githubId, username),
+    getMttfDays(githubId, username),
   ]);
 
   // New users with no repos → onboarding (skip if they already completed it)
@@ -141,6 +177,17 @@ export default async function DashboardPage() {
       color: "text-yellow-600",
       bg: "bg-yellow-50 dark:bg-yellow-950",
     },
+    {
+      label: "Avg Fix Time",
+      value: mttfDays !== null ? `${mttfDays}d` : "—",
+      sub: mttfDays !== null ? "mean time to resolve" : "no fixes recorded yet",
+      color: mttfDays !== null && mttfDays <= 3
+        ? "text-green-600"
+        : mttfDays !== null && mttfDays <= 7
+          ? "text-yellow-600"
+          : "text-gray-500 dark:text-gray-400",
+      bg: "bg-white dark:bg-gray-900",
+    },
   ];
 
   const hasScans = scans.length > 0;
@@ -175,7 +222,7 @@ export default async function DashboardPage() {
       </div>
 
       {/* Stats */}
-      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {statCards.map((s) => (
           <div
             key={s.label}
@@ -194,6 +241,9 @@ export default async function DashboardPage() {
           <TrendChart githubId={githubId} username={username} />
         </div>
       )}
+
+      {/* SLA breach alerts (client component — lazy loads) */}
+      {hasScans && <SlaBreaches slaDays={7} />}
 
       {/* Waiting for first scan — has repos but no scans yet */}
       {connected && !hasScans && (
