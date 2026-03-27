@@ -217,7 +217,7 @@ export default async function DashboardPage() {
             </a>
             <a
               href="/repos"
-              className="rounded-lg bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-700 transition-colors"
+              className="rounded-lg bg-brand-blue px-3 py-1.5 text-sm font-medium text-white hover:opacity-90 transition-opacity"
             >
               Manage repos →
             </a>
@@ -230,7 +230,7 @@ export default async function DashboardPage() {
         {statCards.map((s) => (
           <div
             key={s.label}
-            className={`rounded-xl border border-gray-200 dark:border-gray-700 ${s.bg} p-4 shadow-sm`}
+            className={`rounded-xl border border-gray-200 dark:border-gray-700 border-t-2 border-t-brand-blue ${s.bg} p-4 shadow-sm`}
           >
             <div className={`text-3xl font-bold ${s.color}`}>{s.value}</div>
             <div className="mt-1 text-xs font-semibold text-gray-700 dark:text-gray-200">{s.label}</div>

@@ -78,7 +78,7 @@ export function TopVulns() {
                       href={`https://cwe.mitre.org/data/definitions/${cweNum}.html`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-xs font-mono font-semibold text-blue-600 dark:text-blue-400 hover:underline"
+                      className="text-xs font-mono font-semibold text-brand-blue hover:underline"
                     >
                       {v.cwe_id}
                     </a>

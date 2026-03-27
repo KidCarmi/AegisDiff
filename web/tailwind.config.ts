@@ -7,7 +7,15 @@ const config: Config = {
     "./components/**/*.{js,ts,jsx,tsx,mdx}",
   ],
   theme: {
-    extend: {},
+    extend: {
+      colors: {
+        brand: {
+          blue:    "#38bdf8",   // electric blue — shield outline, primary accent
+          success: "#4ade80",   // green — false positive / safe
+          danger:  "#f87171",   // red — true positive / vulnerability
+        },
+      },
+    },
   },
   plugins: [],
 };

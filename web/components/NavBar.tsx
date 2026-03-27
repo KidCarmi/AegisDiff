@@ -11,7 +11,6 @@ const NAV_LINKS = [
 
 const ADMIN_LINK = { href: "/admin", label: "Admin" };
 
-/** QW4 — pulsing dot on Dashboard link when user hasn't checked in >5 min */
 const STALE_MS = 5 * 60 * 1000;
 const LS_KEY = "aegisdiff_dashboard_ts";
 
@@ -54,11 +53,9 @@ export function NavBar({ isAdmin = false }: { isAdmin?: boolean }) {
 
   useEffect(() => {
     if (path === "/dashboard") {
-      // Visiting dashboard — record timestamp, clear badge
       localStorage.setItem(LS_KEY, String(Date.now()));
       setMaybeNewScans(false);
     } else {
-      // On another page — show badge if dashboard hasn't been checked recently
       const last = parseInt(localStorage.getItem(LS_KEY) ?? "0", 10);
       setMaybeNewScans(last > 0 && Date.now() - last > STALE_MS);
     }
@@ -72,13 +69,16 @@ export function NavBar({ isAdmin = false }: { isAdmin?: boolean }) {
   return (
     <nav className="sticky top-0 z-50 border-b border-gray-200 dark:border-gray-800 bg-white/95 dark:bg-gray-950/95 backdrop-blur-sm px-6 py-3">
       <div className="mx-auto max-w-5xl flex items-center justify-between">
+        {/* Logo */}
         <a
           href="/dashboard"
-          className="flex items-center gap-2 text-xl font-bold text-gray-900 dark:text-gray-50 hover:opacity-80 transition-opacity"
+          className="flex items-center gap-2 font-bold hover:opacity-80 transition-opacity"
         >
-          <img src="/icon-192.png" alt="" className="h-7 w-7 rounded-md" />
-          <span>AegisDiff</span>
+          <img src="/icon-192.png" alt="" className="h-7 w-7 rounded-md ring-1 ring-brand-blue/40" />
+          <span className="text-xl text-brand-blue">AegisDiff</span>
         </a>
+
+        {/* Nav links */}
         <div className="flex items-center gap-1 text-sm">
           {NAV_LINKS.map(({ href, label }) => (
             <a
@@ -86,30 +86,32 @@ export function NavBar({ isAdmin = false }: { isAdmin?: boolean }) {
               href={href}
               className={`relative rounded-md px-3 py-1.5 font-medium transition-colors ${
                 isActive(href)
-                  ? "bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900"
+                  ? "bg-brand-blue text-white"
                   : "text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800"
               }`}
             >
               {label}
-              {/* QW4 — "maybe new scans" indicator */}
               {href === "/dashboard" && maybeNewScans && (
-                <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+                <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-brand-blue animate-pulse" />
               )}
             </a>
           ))}
+
           {isAdmin && (
             <a
               href={ADMIN_LINK.href}
               className={`relative rounded-md px-3 py-1.5 font-medium transition-colors ${
                 isActive(ADMIN_LINK.href)
-                  ? "bg-purple-700 text-white"
-                  : "text-purple-600 dark:text-purple-400 hover:text-purple-800 dark:hover:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-900/30"
+                  ? "bg-brand-blue text-white"
+                  : "text-brand-blue hover:bg-brand-blue/10 dark:hover:bg-brand-blue/10"
               }`}
             >
               {ADMIN_LINK.label}
             </a>
           )}
+
           <ThemeToggle />
+
           <a
             href="/api/auth/signout"
             className="ml-2 rounded-md border border-gray-200 dark:border-gray-700 px-3 py-1.5 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"

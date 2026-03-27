@@ -107,7 +107,7 @@ export function SlaBreaches({ slaDays = 7 }: { slaDays?: number }) {
                       href={`https://cwe.mitre.org/data/definitions/${b.cweId.replace(/\D/g, "")}.html`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-blue-600 dark:text-blue-400 hover:underline shrink-0"
+                      className="text-brand-blue hover:underline shrink-0"
                     >
                       {b.cweId}
                     </a>
@@ -122,7 +122,7 @@ export function SlaBreaches({ slaDays = 7 }: { slaDays?: number }) {
                       href={b.prUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-blue-600 dark:text-blue-400 hover:underline shrink-0"
+                      className="text-brand-blue hover:underline shrink-0"
                     >
                       PR #{b.prNumber}
                     </a>

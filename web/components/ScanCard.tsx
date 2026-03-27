@@ -125,7 +125,7 @@ export function ScanCard({
                       target="_blank"
                       rel="noopener noreferrer"
                       onClick={(e) => e.stopPropagation()}
-                      className="text-blue-500 hover:underline"
+                      className="text-brand-blue hover:underline"
                     >
                       PR #{scan.prNumber}
                     </a>
@@ -160,7 +160,7 @@ export function ScanCard({
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={(e) => e.stopPropagation()}
-                    className="rounded bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 text-[11px] font-mono text-blue-600 dark:text-blue-400 hover:underline"
+                    className="rounded bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 text-[11px] font-mono text-brand-blue hover:underline"
                   >
                     {scan.cweId}
                   </a>
