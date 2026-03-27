@@ -10,7 +10,9 @@
  */
 
 const RESEND_API = "https://api.resend.com/emails";
-const FROM = process.env.EMAIL_FROM ?? "AegisDiff <noreply@aegis-diff.app>";
+// Default to Resend's shared sender — works with no domain setup.
+// Set EMAIL_FROM in Vercel env once you have a custom domain.
+const FROM = process.env.EMAIL_FROM ?? "AegisDiff <onboarding@resend.dev>";
 const BASE_URL = (process.env.NEXTAUTH_URL ?? "https://aegis-diff.vercel.app").replace(/\/$/, "");
 
 async function sendEmail(to: string, subject: string, html: string): Promise<void> {
