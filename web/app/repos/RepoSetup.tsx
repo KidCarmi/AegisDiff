@@ -94,16 +94,17 @@ export function RepoSetup({ owner, name, ingestUrl, appInstalled }: Props) {
           )}
           {state === "permission_error" && (
             <span className="text-xs text-amber-600 dark:text-amber-400">
-              App needs <strong>Contents: read &amp; write</strong> permission.{" "}
+              The GitHub App needs <strong>Contents + Workflows: write</strong> permission
+              — the platform operator is fixing this. In the meantime,{" "}
               <a
-                href={`https://github.com/settings/apps`}
+                href={`https://github.com/settings/installations`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="underline"
               >
-                Fix in GitHub App settings ↗
-              </a>
-              {" "}then re-accept the install. Use manual setup below in the meantime.
+                re-accept permissions here ↗
+              </a>{" "}
+              once updated, or use manual setup below.
             </span>
           )}
           <button

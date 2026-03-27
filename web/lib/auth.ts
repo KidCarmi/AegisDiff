@@ -16,7 +16,7 @@ export const authOptions: NextAuthOptions = {
       authorization: {
         params: {
           // Request read access to repos for RBAC verification
-          scope: "read:user user:email repo",
+          scope: "read:user user:email repo workflow",
         },
       },
     }),
