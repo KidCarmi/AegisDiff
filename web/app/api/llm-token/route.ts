@@ -68,7 +68,7 @@ export async function GET(req: NextRequest) {
   const geminiKey = process.env.PLATFORM_GEMINI_API_KEY ?? "";
   const groqKey   = process.env.PLATFORM_GROQ_API_KEY   ?? "";
 
-  if (!geminiKey && !groqKey) {
+  if (!groqKey) {
     return NextResponse.json(
       { error: "Platform AI keys not configured — contact support." },
       { status: 503 }
