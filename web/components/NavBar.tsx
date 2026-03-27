@@ -9,6 +9,8 @@ const NAV_LINKS = [
   { href: "/settings", label: "Settings" },
 ];
 
+const ADMIN_LINK = { href: "/admin", label: "Admin" };
+
 /** QW4 — pulsing dot on Dashboard link when user hasn't checked in >5 min */
 const STALE_MS = 5 * 60 * 1000;
 const LS_KEY = "aegisdiff_dashboard_ts";
@@ -46,7 +48,7 @@ function ThemeToggle() {
   );
 }
 
-export function NavBar() {
+export function NavBar({ isAdmin = false }: { isAdmin?: boolean }) {
   const path = usePathname();
   const [maybeNewScans, setMaybeNewScans] = useState(false);
 
@@ -94,6 +96,18 @@ export function NavBar() {
               )}
             </a>
           ))}
+          {isAdmin && (
+            <a
+              href={ADMIN_LINK.href}
+              className={`relative rounded-md px-3 py-1.5 font-medium transition-colors ${
+                isActive(ADMIN_LINK.href)
+                  ? "bg-purple-700 text-white"
+                  : "text-purple-600 dark:text-purple-400 hover:text-purple-800 dark:hover:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-900/30"
+              }`}
+            >
+              {ADMIN_LINK.label}
+            </a>
+          )}
           <ThemeToggle />
           <a
             href="/api/auth/signout"
