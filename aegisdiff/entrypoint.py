@@ -192,35 +192,46 @@ def main() -> None:
     ]
     gemini_key = cfg.gemini_api_key
 
-    # ── Platform key fallback — fetch if user hasn't provided their own ───
-    if not gemini_key and not groq_keys:
-        oidc = _get_oidc_token()
-        if oidc and cfg.aegisdiff_ingest_url:
-            logger.info("No user LLM keys found — fetching platform keys via OIDC")
-            platform = _fetch_platform_keys(cfg.aegisdiff_ingest_url, oidc)
-            gemini_key = platform.get("gemini_key", "") or ""
-            groq_keys = [k for k in platform.get("groq_keys", []) if k]
-            if not groq_keys and platform.get("groq_key"):
-                groq_keys = [platform["groq_key"]]
-        if not gemini_key and not groq_keys:
-            logger.error(
-                "No LLM keys available. Either:\n"
-                "  1. Add GEMINI_API_KEY or GROQ_API_KEY to your repo secrets (unlimited), or\n"
-                "  2. Ensure AEGISDIFF_INGEST_URL is set (platform keys, 100 scans/day free)."
-            )
-            sys.exit(1)
-    else:
-        logger.info("Using user-provided LLM keys (unlimited scans)")
-
-    # Build provider list — only include providers with keys configured.
-    # Multiple Groq keys rotate automatically on rate-limit (429).
+    # ── Build provider list ────────────────────────────────────────────────
+    # Priority: user keys first (unlimited), then platform keys via OIDC
+    # (100 scans/day free). Platform keys are ALWAYS appended as fallback
+    # even when user keys are set — this ensures scans work even when user
+    # keys expire, are revoked, or hit quota.
     providers = []
     if gemini_key:
         providers.append(GeminiProvider(gemini_key))
-        logger.info("Provider: Gemini 2.0 Flash")
+        logger.info("Provider: Gemini 2.0 Flash (user key)")
     for i, key in enumerate(groq_keys, start=1):
         providers.append(GroqProvider(key))
-        logger.info("Provider: Groq Llama-3-70b (key %d/%d)", i, len(groq_keys))
+        logger.info("Provider: Groq Llama-3-70b (user key %d/%d)", i, len(groq_keys))
+
+    # Always attempt to fetch platform keys via OIDC and append as fallback.
+    # Non-fatal if OIDC is unavailable (local runs, forks without secrets).
+    oidc = _get_oidc_token()
+    if oidc and cfg.aegisdiff_ingest_url:
+        if not providers:
+            logger.info("No user LLM keys — fetching platform keys via OIDC")
+        else:
+            logger.info("Appending platform keys as fallback providers via OIDC")
+        platform = _fetch_platform_keys(cfg.aegisdiff_ingest_url, oidc)
+        platform_gemini = platform.get("gemini_key", "") or ""
+        platform_groq = [k for k in platform.get("groq_keys", []) if k]
+        if not platform_groq and platform.get("groq_key"):
+            platform_groq = [platform["groq_key"]]
+        if platform_gemini:
+            providers.append(GeminiProvider(platform_gemini))
+            logger.info("Provider: Gemini 2.0 Flash (platform key)")
+        for i, key in enumerate(platform_groq, start=1):
+            providers.append(GroqProvider(key))
+            logger.info("Provider: Groq Llama-3-70b (platform key %d/%d)", i, len(platform_groq))
+
+    if not providers:
+        logger.error(
+            "No LLM keys available. Either:\n"
+            "  1. Add GEMINI_API_KEY or GROQ_API_KEY to your repo secrets (unlimited), or\n"
+            "  2. Ensure AEGISDIFF_INGEST_URL is set (platform keys, 100 scans/day free)."
+        )
+        sys.exit(1)
 
     orchestrator = LLMOrchestrator(providers, max_retries_per_provider=3)
     engine = TriageEngine(orchestrator, repo_root=Path("."))

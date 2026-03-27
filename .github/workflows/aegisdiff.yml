@@ -92,7 +92,7 @@ jobs:
       # ── 5. Run AegisDiff triage ──────────────────────────────────────────
       # AEGISDIFF_INGEST_URL is the only required secret.
       # LLM keys are optional — if omitted, the engine fetches platform keys
-      # from AegisDiff automatically (free tier: 50 scans/day per repo).
+      # from AegisDiff automatically (free tier: 100 scans/day per repo).
       # Add GEMINI_API_KEY and/or GROQ_API_KEY for unlimited scans.
       - name: Run AegisDiff triage
         if: steps.diff.outputs.skip == 'false'
