@@ -67,9 +67,7 @@ class GroqProvider(LLMProvider):
                 # Also catch the case where Groq returns a plain 400 with no
                 # matching phrase — still rewrite to 413 as a safe fallback
                 # because a non-413 400 from Groq is almost always a size issue.
-                is_size_error = any(
-                    phrase in err_msg.lower() for phrase in _GROQ_TOO_LARGE_PHRASES
-                )
+                is_size_error = any(phrase in err_msg.lower() for phrase in _GROQ_TOO_LARGE_PHRASES)
                 if is_size_error or not err_msg:
                     synthetic = httpx.Response(
                         status_code=413,

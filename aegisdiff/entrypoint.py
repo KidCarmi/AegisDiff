@@ -217,7 +217,7 @@ def main() -> None:
     providers = []
     if gemini_key:
         providers.append(GeminiProvider(gemini_key))
-        logger.info("Provider: Gemini 1.5 Pro")
+        logger.info("Provider: Gemini 2.0 Flash")
     for i, key in enumerate(groq_keys, start=1):
         providers.append(GroqProvider(key))
         logger.info("Provider: Groq Llama-3-70b (key %d/%d)", i, len(groq_keys))
