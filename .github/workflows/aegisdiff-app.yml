@@ -15,6 +15,11 @@ on:
 # The App needs the `security_events` permission enabled in its GitHub App settings.
 # See: https://github.com/settings/apps/<your-app> → Permissions → Security Events → Read & Write
 
+permissions:
+  contents: read
+  models: read        # GitHub Models API (GITHUB_TOKEN fallback LLM)
+  id-token: write     # OIDC token for platform key fetch + dashboard ingest
+
 jobs:
   analyze:
     name: Triage PR diff

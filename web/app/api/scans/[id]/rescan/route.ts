@@ -16,7 +16,8 @@ import { createHmac } from "crypto";
 const MAX_RESCANS_PER_HOUR = 3;
 
 function deriveRepoToken(repoSlug: string): string {
-  const secret = process.env.GITHUB_APP_WEBHOOK_SECRET ?? "dev-secret";
+  const secret = process.env.GITHUB_APP_WEBHOOK_SECRET;
+  if (!secret) throw new Error("GITHUB_APP_WEBHOOK_SECRET is not set — cannot derive repo token");
   return createHmac("sha256", secret).update(repoSlug).digest("hex");
 }
 
@@ -150,6 +151,6 @@ export async function POST(
     return NextResponse.json({ ok: true, message: "Re-scan queued — results in ~90s" });
   } catch (err: any) {
     console.error("[rescan] Error:", err);
-    return NextResponse.json({ error: err?.message ?? "Internal error" }, { status: 500 });
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

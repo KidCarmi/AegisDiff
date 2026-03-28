@@ -343,7 +343,7 @@ def main() -> None:
             "Scan results will NOT appear in the dashboard."
         )
     else:
-        auth_token = _get_oidc_token() or cfg.aegisdiff_repo_token
+        auth_token = oidc or cfg.aegisdiff_repo_token
         if auth_token:
             # Send all findings as an array (one DB row per finding per PR)
             ingest_payload = all_verdicts if len(all_verdicts) > 1 else verdict

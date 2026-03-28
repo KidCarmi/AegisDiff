@@ -451,14 +451,16 @@ def _resolve_js(source_code: str, func_names: List[str], file_path: str) -> Dict
 def _js_resolve(rel: str, importing_file: str) -> Optional[str]:
     base = PurePosixPath(importing_file).parent
     resolved = base / rel
-    # Return without extension — caller tries GitHub API which handles it
     try:
+        # Normalize to collapse any ../ sequences, then verify result stays
+        # within the repo root (no leading .. after normalization).
+        normalized = PurePosixPath(resolved.as_posix()).parts
+        if normalized and normalized[0] == "..":
+            return None
         s = str(resolved)
-        if not s.startswith(".."):
-            # Add .js default if no extension
-            if not Path(s).suffix:
-                return s + ".js"
-            return s
+        if not Path(s).suffix:
+            return s + ".js"
+        return s
     except Exception:
         pass
     return None

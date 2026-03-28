@@ -123,6 +123,6 @@ export async function POST(
     return NextResponse.json({ ok: true });
   } catch (err: any) {
     console.error("[feedback] Error:", err);
-    return NextResponse.json({ error: err?.message ?? "Internal error" }, { status: 500 });
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

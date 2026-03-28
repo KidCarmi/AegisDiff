@@ -27,7 +27,8 @@ import { sql } from "../../../../lib/db";
  * This lets us reconstruct the raw token at dispatch time without storing it.
  */
 function deriveRepoToken(repoSlug: string): { rawToken: string; tokenHash: string } {
-  const secret = process.env.GITHUB_APP_WEBHOOK_SECRET ?? "dev-secret";
+  const secret = process.env.GITHUB_APP_WEBHOOK_SECRET;
+  if (!secret) throw new Error("GITHUB_APP_WEBHOOK_SECRET is not set — cannot derive repo token");
   const rawToken = createHmac("sha256", secret).update(repoSlug).digest("hex");
   const tokenHash = createHash("sha256").update(rawToken).digest("hex");
   return { rawToken, tokenHash };
