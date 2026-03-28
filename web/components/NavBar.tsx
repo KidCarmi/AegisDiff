@@ -20,6 +20,15 @@ function ThemeToggle() {
 
   useEffect(() => {
     setDark(document.documentElement.classList.contains("dark"));
+
+    function onStorage(e: StorageEvent) {
+      if (e.key !== "aegisdiff-theme") return;
+      const next = e.newValue === "dark";
+      setDark(next);
+      document.documentElement.classList.toggle("dark", next);
+    }
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, []);
 
   function toggle() {
