@@ -144,7 +144,9 @@ def main() -> None:
         "Fetching diff for %s#%d (installation %d)", target_repo, pr_number, installation_id
     )
     installation_token = app_client.get_installation_token(installation_id)
-    raw_diff = app_client.get_pr_diff(installation_id, owner, repo_name, pr_number, token=installation_token)
+    raw_diff = app_client.get_pr_diff(
+        installation_id, owner, repo_name, pr_number, token=installation_token
+    )
 
     if not raw_diff.strip():
         logger.info("Empty diff — nothing to analyze")
