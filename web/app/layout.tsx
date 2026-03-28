@@ -6,6 +6,7 @@ import { authOptions } from "../lib/auth";
 import { isPlatformAdminSession } from "../lib/rbac";
 
 export const metadata: Metadata = {
+  metadataBase: new URL(process.env.NEXTAUTH_URL ?? "https://aegisdiff.orelsec.com"),
   title: "AegisDiff — AppSec Triage",
   description: "Zero-cost autonomous security triage for your pull requests",
   icons: {

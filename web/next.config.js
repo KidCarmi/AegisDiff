@@ -52,8 +52,10 @@ module.exports = withSentryConfig(nextConfig, {
   // in your Vercel project to enable source-map uploads on deploy.
   silent: !process.env.CI,           // suppress noise locally, show in CI
   hideSourceMaps: true,              // don't ship source maps to the browser
-  disableLogger: true,               // tree-shake Sentry debug logs from bundle
   tunnelRoute: "/monitoring",        // proxy errors through our origin (bypasses ad-blockers)
   widenClientFileUpload: true,       // upload more source files for better stack traces
-  automaticVercelMonitors: false,    // we don't use Vercel Cron
+  webpack: {
+    treeshake: { removeDebugLogging: true }, // tree-shake Sentry debug logs from bundle
+    automaticVercelMonitors: false,          // we don't use Vercel Cron
+  },
 });
