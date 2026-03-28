@@ -49,67 +49,88 @@ class LLMOrchestrator:
     def complete(self, request: LLMRequest) -> LLMResponse:
         last_exc: Optional[Exception] = None
 
-        for provider in self._providers:
-            # context_scale tracks adaptive trimming: halved on every 413 response
-            context_scale = 1.0
+        # Two outer passes: first try all providers, then (if all rate-limited)
+        # sleep once and try the whole list again before giving up.
+        for full_pass in range(2):
+            if full_pass == 1:
+                logger.warning(
+                    "All providers rate-limited — sleeping 30s before retrying full list"
+                )
+                time.sleep(30.0)
 
-            for attempt in range(1, self._max_retries + 1):
-                adapted = self._adapt_request(request, provider, context_scale)
-                try:
-                    logger.info(
-                        "LLM attempt %d/%d via %s (context scale %.0f%%)",
-                        attempt,
-                        self._max_retries,
-                        provider.name,
-                        context_scale * 100,
-                    )
-                    response = provider.complete(adapted)
-                    logger.info(
-                        "LLM success via %s in %.0fms (%d in / %d out tokens)",
-                        provider.name,
-                        response.latency_ms,
-                        response.input_tokens,
-                        response.output_tokens,
-                    )
-                    return response
+            for provider in self._providers:
+                # context_scale tracks adaptive trimming: halved on every 413 response
+                context_scale = 1.0
 
-                except Exception as exc:
-                    last_exc = exc
-
-                    # 413 = HTTP payload too large: shrink context and retry
-                    if (
-                        isinstance(exc, httpx.HTTPStatusError)
-                        and exc.response.status_code == 413
-                        and context_scale > 0.12  # stop shrinking below ~12%
-                    ):
-                        context_scale *= 0.5
-                        logger.warning(
-                            "413 Payload Too Large from %s — shrinking context to %.0f%%",
+                for attempt in range(1, self._max_retries + 1):
+                    adapted = self._adapt_request(request, provider, context_scale)
+                    try:
+                        logger.info(
+                            "LLM attempt %d/%d via %s (context scale %.0f%%)",
+                            attempt,
+                            self._max_retries,
                             provider.name,
                             context_scale * 100,
                         )
-                        continue  # retry same provider with smaller context
-
-                    if not provider.is_retryable_error(exc):
-                        logger.warning(
-                            "Non-retryable error from %s: %s — rotating provider",
+                        response = provider.complete(adapted)
+                        logger.info(
+                            "LLM success via %s in %.0fms (%d in / %d out tokens)",
                             provider.name,
-                            exc,
+                            response.latency_ms,
+                            response.input_tokens,
+                            response.output_tokens,
                         )
-                        break  # Skip remaining retries, try next provider
+                        return response
 
-                    delay = self._backoff_delay(attempt)
-                    logger.warning(
-                        "Retryable error from %s (attempt %d/%d): %s — sleeping %.1fs",
-                        provider.name,
-                        attempt,
-                        self._max_retries,
-                        exc,
-                        delay,
-                    )
-                    time.sleep(delay)
+                    except Exception as exc:
+                        last_exc = exc
 
-            logger.error("Provider %s exhausted — trying next", provider.name)
+                        # 413 = HTTP payload too large: shrink context and retry
+                        if (
+                            isinstance(exc, httpx.HTTPStatusError)
+                            and exc.response.status_code == 413
+                            and context_scale > 0.12  # stop shrinking below ~12%
+                        ):
+                            context_scale *= 0.5
+                            logger.warning(
+                                "413 Payload Too Large from %s — shrinking context to %.0f%%",
+                                provider.name,
+                                context_scale * 100,
+                            )
+                            continue  # retry same provider with smaller context
+
+                        # 429 = rate limited: rotate immediately, don't waste time
+                        # sleeping on a key that won't recover for ~60s.
+                        if (
+                            isinstance(exc, httpx.HTTPStatusError)
+                            and exc.response.status_code == 429
+                        ):
+                            logger.warning(
+                                "Rate limit (429) from %s — rotating to next provider",
+                                provider.name,
+                            )
+                            break  # skip remaining retries for this provider
+
+                        if not provider.is_retryable_error(exc):
+                            logger.warning(
+                                "Non-retryable error from %s: %s — rotating provider",
+                                provider.name,
+                                exc,
+                            )
+                            break  # Skip remaining retries, try next provider
+
+                        delay = self._backoff_delay(attempt)
+                        logger.warning(
+                            "Retryable error from %s (attempt %d/%d): %s — sleeping %.1fs",
+                            provider.name,
+                            attempt,
+                            self._max_retries,
+                            exc,
+                            delay,
+                        )
+                        time.sleep(delay)
+
+                logger.error("Provider %s exhausted — trying next", provider.name)
 
         raise RuntimeError(f"All LLM providers exhausted. Last error: {last_exc}") from last_exc
 
