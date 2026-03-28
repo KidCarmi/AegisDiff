@@ -22,9 +22,13 @@ export async function GET(req: NextRequest) {
 
   const rows = await sql`
     SELECT
-      REGEXP_REPLACE(COALESCE(s.cwe_id, 'Unknown'), '^CWE-0+([0-9]+)', 'CWE-\1') AS cwe_id,
+      CASE
+        WHEN s.cwe_id ~ '^CWE-0'
+        THEN 'CWE-' || LTRIM(SUBSTRING(s.cwe_id FROM 5), '0')
+        ELSE COALESCE(s.cwe_id, 'Unknown')
+      END                                      AS cwe_id,
       s.severity,
-      MODE() WITHIN GROUP (ORDER BY s.title)  AS title,
+      MODE() WITHIN GROUP (ORDER BY s.title)   AS title,
       COUNT(*)                                 AS total,
       COUNT(*) FILTER (WHERE s.verdict = 'TRUE_POSITIVE')  AS true_positives,
       COUNT(*) FILTER (WHERE s.verdict = 'NEEDS_REVIEW')   AS needs_review,
@@ -49,7 +53,13 @@ export async function GET(req: NextRequest) {
     AND s.verdict IN ('TRUE_POSITIVE', 'NEEDS_REVIEW')
     AND s.cwe_id IS NOT NULL
     AND s.cwe_id != 'N/A'
-    GROUP BY REGEXP_REPLACE(COALESCE(s.cwe_id, 'Unknown'), '^CWE-0+([0-9]+)', 'CWE-\1'), s.severity
+    GROUP BY
+      CASE
+        WHEN s.cwe_id ~ '^CWE-0'
+        THEN 'CWE-' || LTRIM(SUBSTRING(s.cwe_id FROM 5), '0')
+        ELSE COALESCE(s.cwe_id, 'Unknown')
+      END,
+      s.severity
     ORDER BY true_positives DESC, total DESC
     LIMIT 15
   `;
