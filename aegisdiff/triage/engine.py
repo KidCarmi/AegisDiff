@@ -16,6 +16,20 @@ from .verdicts import Severity, Verdict, VerdictType, parse_verdict
 
 logger = logging.getLogger(__name__)
 
+# Files matching these patterns carry no production security risk and are
+# skipped from LLM analysis to avoid wasting quota + context budget.
+_TEST_FILE_PATTERNS = re.compile(
+    r"(^|/)(test_[^/]+|[^/]+_test|[^/]+\.test|[^/]+\.spec)\."
+    r"(py|js|ts|go|java|rb|cs|php)$"
+    r"|/(tests?|spec|__tests__|test_helpers?)/",
+    re.IGNORECASE,
+)
+
+
+def _is_test_file(file_path: str) -> bool:
+    """Return True if the file is a test/spec file with no prod security risk."""
+    return bool(_TEST_FILE_PATTERNS.search(file_path))
+
 # Verdict/severity rank used for aggregation (higher = worse / more actionable)
 _VERDICT_RANK = {
     VerdictType.TRUE_POSITIVE: 3,
@@ -157,6 +171,10 @@ class TriageEngine:
 
         verdicts: List[Verdict] = []
         for file_path, chunk in chunks:
+            if _is_test_file(file_path):
+                logger.info("Skipping test file: %s", file_path)
+                verdicts.append(Verdict.no_op())
+                continue
             logger.info("Analyzing chunk: %s (%d lines)", file_path, chunk.count("\n"))
             verdict = self.analyze_diff(chunk)
             verdicts.append(verdict)

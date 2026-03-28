@@ -98,6 +98,7 @@ class LLMOrchestrator:
                                 provider.name,
                                 context_scale * 100,
                             )
+                            time.sleep(2.0)  # brief pause before retry
                             continue  # retry same provider with smaller context
 
                         # 429 = rate limited: rotate immediately, don't waste time
