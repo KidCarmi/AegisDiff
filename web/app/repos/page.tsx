@@ -84,7 +84,6 @@ export default async function ReposPage() {
   const repos = await getRepos(githubId, username);
 
   const appSlug = process.env.NEXT_PUBLIC_GITHUB_APP_SLUG ?? "aegisdiff";
-  const ingestUrl = `${process.env.NEXTAUTH_URL ?? ""}/api/ingest`;
 
   return (
     <div>
@@ -171,7 +170,7 @@ export default async function ReposPage() {
                     </div>
                   </div>
                 </div>
-                <RepoSetup owner={repo.owner} name={repo.name} ingestUrl={ingestUrl} appInstalled={repo.appInstalled} />
+                <RepoSetup owner={repo.owner} name={repo.name} appInstalled={repo.appInstalled} appSlug={appSlug} />
               </div>
             );
           })}

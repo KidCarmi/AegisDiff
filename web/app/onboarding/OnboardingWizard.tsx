@@ -4,48 +4,14 @@ import { useState } from "react";
 
 interface Props {
   username: string;
-  ingestUrl: string;
   appSlug: string;
 }
-
-type Method = "app" | "manual" | null;
 
 const GITHUB_SVG = (
   <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
     <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z" />
   </svg>
 );
-
-function CopyButton({ value }: { value: string }) {
-  const [copied, setCopied] = useState(false);
-  async function copy() {
-    await navigator.clipboard.writeText(value);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }
-  return (
-    <button
-      onClick={copy}
-      className="shrink-0 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors"
-    >
-      {copied ? "✓ Copied" : "Copy"}
-    </button>
-  );
-}
-
-function SecretRow({ name, value }: { name: string; value: string }) {
-  return (
-    <div className="space-y-1">
-      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{name}</p>
-      <div className="flex items-center gap-2">
-        <code className="flex-1 rounded-lg bg-gray-900 text-green-400 px-3 py-2 text-xs font-mono break-all">
-          {value}
-        </code>
-        <CopyButton value={value} />
-      </div>
-    </div>
-  );
-}
 
 function StepDots({ total, current }: { total: number; current: number }) {
   return (
@@ -70,7 +36,7 @@ function StepDots({ total, current }: { total: number; current: number }) {
 function StepWelcome({ username, onNext }: { username: string; onNext: () => void }) {
   return (
     <div>
-      <StepDots total={3} current={1} />
+      <StepDots total={2} current={1} />
       <div className="mb-2 text-4xl">🛡️</div>
       <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-50 mb-2">
         Welcome{username ? `, @${username}` : ""}!
@@ -105,88 +71,7 @@ function StepWelcome({ username, onNext }: { username: string; onNext: () => voi
   );
 }
 
-// ─── Step 2: Choose method ────────────────────────────────────────────────────
-function StepChoose({
-  appSlug,
-  onChoose,
-}: {
-  appSlug: string;
-  onChoose: (method: Method) => void;
-}) {
-  return (
-    <div>
-      <StepDots total={3} current={2} />
-      <h2 className="text-xl font-bold text-gray-900 dark:text-gray-50 mb-1">Connect a repository</h2>
-      <p className="text-gray-500 dark:text-gray-400 text-sm mb-6">Choose how you want to integrate AegisDiff.</p>
-
-      <div className="space-y-3 mb-6">
-        {/* GitHub App card */}
-        <button
-          onClick={() => onChoose("app")}
-          className="w-full text-left rounded-xl border-2 border-blue-500 bg-blue-50 p-5 hover:bg-blue-100 transition-colors group"
-        >
-          <div className="flex items-start justify-between">
-            <div className="flex-1">
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-sm font-bold text-blue-900">GitHub App</span>
-                <span className="rounded-full bg-blue-600 px-2 py-0.5 text-xs font-semibold text-white">
-                  Recommended
-                </span>
-              </div>
-              <p className="text-xs text-blue-700 leading-relaxed">
-                One-click install. No YAML files, no API keys, no secrets.
-                AegisDiff uses its own API keys — you pay nothing.
-              </p>
-              <div className="mt-3 flex gap-2 flex-wrap">
-                {["No config", "Our API keys", "Instant"].map((tag) => (
-                  <span key={tag} className="rounded-md bg-blue-100 px-2 py-0.5 text-xs text-blue-700">
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            </div>
-            <span className="ml-4 text-blue-500 group-hover:translate-x-0.5 transition-transform">→</span>
-          </div>
-        </button>
-
-        {/* Manual card */}
-        <button
-          onClick={() => onChoose("manual")}
-          className="w-full text-left rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-5 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors group"
-        >
-          <div className="flex items-start justify-between">
-            <div className="flex-1">
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-sm font-bold text-gray-800 dark:text-gray-100">Manual workflow</span>
-                <span className="rounded-full bg-gray-100 dark:bg-gray-800 px-2 py-0.5 text-xs font-medium text-gray-500 dark:text-gray-400">
-                  Advanced
-                </span>
-              </div>
-              <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
-                Copy a workflow file into your repo. Bring your own OpenRouter API key (free).
-                Full control over every step.
-              </p>
-              <div className="mt-3 flex gap-2 flex-wrap">
-                {["Your API keys", "Full control", "Open source"].map((tag) => (
-                  <span key={tag} className="rounded-md bg-gray-100 dark:bg-gray-800 px-2 py-0.5 text-xs text-gray-600 dark:text-gray-300">
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            </div>
-            <span className="ml-4 text-gray-400 group-hover:translate-x-0.5 transition-transform">→</span>
-          </div>
-        </button>
-      </div>
-
-      <a href="/dashboard" className="text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400">
-        Skip for now →
-      </a>
-    </div>
-  );
-}
-
-// ─── Step 3a: GitHub App ──────────────────────────────────────────────────────
+// ─── Step 2: GitHub App Install ───────────────────────────────────────────────
 function StepAppInstall({
   appSlug,
   onDone,
@@ -198,10 +83,11 @@ function StepAppInstall({
 
   return (
     <div>
-      <StepDots total={3} current={3} />
+      <StepDots total={2} current={2} />
       <h2 className="text-xl font-bold text-gray-900 dark:text-gray-50 mb-1">Install the GitHub App</h2>
       <p className="text-gray-500 dark:text-gray-400 text-sm mb-6">
-        Select the repos you want to scan. AegisDiff handles everything from there.
+        Select the repos you want to scan. AegisDiff handles everything from there —
+        no YAML files, no API keys, no secrets.
       </p>
 
       <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-5 mb-6 space-y-3">
@@ -247,103 +133,25 @@ function StepAppInstall({
           </button>
         )}
       </div>
-    </div>
-  );
-}
 
-// ─── Step 3b: Manual setup ────────────────────────────────────────────────────
-function StepManualSetup({ ingestUrl, onDone }: { ingestUrl: string; onDone: () => void }) {
-  return (
-    <div>
-      <StepDots total={3} current={3} />
-      <h2 className="text-xl font-bold text-gray-900 dark:text-gray-50 mb-1">Manual setup</h2>
-      <p className="text-gray-500 dark:text-gray-400 text-sm mb-6">
-        Three steps — takes about 2 minutes.
-      </p>
-
-      <div className="space-y-5 mb-8">
-        {/* Step 1 */}
-        <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-5">
-          <div className="flex items-center gap-2 mb-3">
-            <span className="w-5 h-5 rounded-full bg-gray-900 text-white text-xs font-bold flex items-center justify-center">1</span>
-            <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">Add your LLM API key</span>
-          </div>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-            Get a free key from{" "}
-            <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
-              OpenRouter
-            </a>{" "}
-            (no credit card required). Add it as a secret in your repo.
-          </p>
-          <div className="flex gap-2 flex-wrap">
-            <code className="rounded-md bg-gray-100 dark:bg-gray-800 px-2 py-1 text-xs font-mono text-gray-700 dark:text-gray-200">OPENROUTER_API_KEY</code>
-          </div>
-        </div>
-
-        {/* Step 2 */}
-        <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-5">
-          <div className="flex items-center gap-2 mb-3">
-            <span className="w-5 h-5 rounded-full bg-gray-900 text-white text-xs font-bold flex items-center justify-center">2</span>
-            <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">Add the ingest URL secret</span>
-          </div>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-            This tells the workflow where to send scan results. Auth is automatic via GitHub OIDC.
-          </p>
-          <SecretRow name="AEGISDIFF_INGEST_URL" value={ingestUrl} />
-        </div>
-
-        {/* Step 3 */}
-        <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-5">
-          <div className="flex items-center gap-2 mb-3">
-            <span className="w-5 h-5 rounded-full bg-gray-900 text-white text-xs font-bold flex items-center justify-center">3</span>
-            <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">Copy the workflow file</span>
-          </div>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-            Save this file at{" "}
-            <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded text-gray-700 dark:text-gray-300">.github/workflows/aegisdiff.yml</code>
-            {" "}in your repo and commit it.
-          </p>
-          <div className="flex gap-2 flex-wrap">
-            <a
-              href="https://github.com/KidCarmi/AegisDiff/blob/main/.github/workflows/aegisdiff.yml"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-            >
-              {GITHUB_SVG}
-              View on GitHub
-            </a>
-            <a
-              href="https://raw.githubusercontent.com/KidCarmi/AegisDiff/main/.github/workflows/aegisdiff.yml"
-              download="aegisdiff.yml"
-              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-            >
-              ↓ Download aegisdiff.yml
-            </a>
-          </div>
-        </div>
+      <div className="mt-4">
+        <a href="/dashboard" className="text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400">
+          Skip for now →
+        </a>
       </div>
-
-      <button
-        onClick={onDone}
-        className="rounded-xl bg-gray-900 px-6 py-3 text-sm font-semibold text-white hover:bg-gray-700 transition-colors"
-      >
-        Done, go to dashboard →
-      </button>
     </div>
   );
 }
 
-// ─── Step 4: All done ─────────────────────────────────────────────────────────
-function StepDone({ method }: { method: Method }) {
+// ─── Step 3: All done ─────────────────────────────────────────────────────────
+function StepDone() {
   return (
     <div>
       <div className="mb-4 text-5xl">🎉</div>
       <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-50 mb-2">You&apos;re all set!</h2>
       <p className="text-gray-500 dark:text-gray-400 text-sm mb-8 max-w-md leading-relaxed">
-        {method === "app"
-          ? "The GitHub App is installed. Open any pull request on a connected repo — AegisDiff will post a security analysis as a comment within ~90 seconds."
-          : "The workflow is set up. Open any pull request and AegisDiff will automatically analyze it for security vulnerabilities."}
+        The GitHub App is installed. Open any pull request on a connected repo — AegisDiff
+        will post a security analysis as a comment within ~90 seconds.
       </p>
 
       <div className="rounded-xl border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950 p-5 mb-8">
@@ -385,31 +193,19 @@ function StepDone({ method }: { method: Method }) {
 }
 
 // ─── Main wizard ──────────────────────────────────────────────────────────────
-export function OnboardingWizard({ username, ingestUrl, appSlug }: Props) {
-  const [step, setStep] = useState<"welcome" | "choose" | "setup" | "done">("welcome");
-  const [method, setMethod] = useState<Method>(null);
-
-  function handleChoose(m: Method) {
-    setMethod(m);
-    setStep("setup");
-  }
+export function OnboardingWizard({ username, appSlug }: Props) {
+  const [step, setStep] = useState<"welcome" | "install" | "done">("welcome");
 
   return (
     <div className="min-h-[calc(100vh-64px)] flex items-start justify-center pt-12 px-4">
       <div className="w-full max-w-lg">
         {step === "welcome" && (
-          <StepWelcome username={username} onNext={() => setStep("choose")} />
+          <StepWelcome username={username} onNext={() => setStep("install")} />
         )}
-        {step === "choose" && (
-          <StepChoose appSlug={appSlug} onChoose={handleChoose} />
-        )}
-        {step === "setup" && method === "app" && (
+        {step === "install" && (
           <StepAppInstall appSlug={appSlug} onDone={() => setStep("done")} />
         )}
-        {step === "setup" && method === "manual" && (
-          <StepManualSetup ingestUrl={ingestUrl} onDone={() => setStep("done")} />
-        )}
-        {step === "done" && <StepDone method={method} />}
+        {step === "done" && <StepDone />}
       </div>
     </div>
   );

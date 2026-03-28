@@ -13,13 +13,11 @@ export default async function OnboardingPage() {
 
   const username =
     (session.user as any).username as string ?? session.user?.name ?? "";
-  const ingestUrl = `${process.env.NEXTAUTH_URL ?? ""}/api/ingest`;
   const appSlug = process.env.NEXT_PUBLIC_GITHUB_APP_SLUG ?? "aegisdiff";
 
   return (
     <OnboardingWizard
       username={username}
-      ingestUrl={ingestUrl}
       appSlug={appSlug}
     />
   );
