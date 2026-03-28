@@ -10,7 +10,8 @@ import { sql } from "../../lib/db";
 import { AdminTabs } from "./AdminTabs";
 
 async function getStats() {
-  const [scanStats, topRepos, userStats, rateLimited, recentAudit] =
+  const [scanStats, topRepos, userStats, rateLimited, recentAudit,
+         providerFailures, failureReasons, failureTrend] =
     await Promise.all([
       sql`
         SELECT
@@ -53,6 +54,44 @@ async function getStats() {
         SELECT action, repo_owner, repo_name, details, created_at
         FROM audit_log ORDER BY created_at DESC LIMIT 15
       `,
+      // Failures by provider module (7d)
+      sql`
+        SELECT
+          COALESCE(provider, 'unknown')                                     AS provider,
+          COUNT(*)                                                           AS total,
+          COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '1 day')    AS today,
+          COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours') AS last_24h
+        FROM scans
+        WHERE verdict = 'ERROR'
+          AND created_at > NOW() - INTERVAL '7 days'
+        GROUP BY provider
+        ORDER BY total DESC
+      `,
+      // Top error messages (from title field, 7d)
+      sql`
+        SELECT
+          title,
+          COUNT(*)        AS count,
+          MAX(created_at) AS last_seen
+        FROM scans
+        WHERE verdict = 'ERROR'
+          AND created_at > NOW() - INTERVAL '7 days'
+          AND title IS NOT NULL
+        GROUP BY title
+        ORDER BY count DESC
+        LIMIT 12
+      `,
+      // Daily error trend (last 7 days)
+      sql`
+        SELECT
+          DATE_TRUNC('day', created_at AT TIME ZONE 'UTC')::date AS day,
+          COUNT(*)                                                 AS errors
+        FROM scans
+        WHERE verdict = 'ERROR'
+          AND created_at > NOW() - INTERVAL '7 days'
+        GROUP BY day
+        ORDER BY day ASC
+      `,
     ]);
 
   return {
@@ -61,6 +100,9 @@ async function getStats() {
     users: userStats[0] as any,
     rateLimited: rateLimited as any[],
     recentAudit: recentAudit as any[],
+    providerFailures: providerFailures as any[],
+    failureReasons: failureReasons as any[],
+    failureTrend: failureTrend as any[],
   };
 }
 
@@ -68,7 +110,8 @@ export default async function AdminPage() {
   const session = await getServerSession(authOptions);
   if (!session || !isPlatformAdminSession(session)) redirect("/dashboard");
 
-  const { scans, topRepos, users, rateLimited, recentAudit } = await getStats();
+  const { scans, topRepos, users, rateLimited, recentAudit,
+          providerFailures, failureReasons, failureTrend } = await getStats();
 
   return (
     <div className="space-y-8">
@@ -93,6 +136,9 @@ export default async function AdminPage() {
         users={users}
         rateLimited={rateLimited}
         recentAudit={recentAudit}
+        providerFailures={providerFailures}
+        failureReasons={failureReasons}
+        failureTrend={failureTrend}
       />
     </div>
   );
