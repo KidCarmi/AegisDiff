@@ -35,9 +35,9 @@ scripts/         local_scan.py for manual testing
    severity, CWE ID, confidence, title, provider, timing. No code, no diffs, no
    evidence strings. Evidence lives ONLY in the GitHub PR comment.
 
-2. **LLM provider priority: OpenRouter llama-3.3-70b:free → llama-4-maverick:free → GitHub Models (GITHUB_TOKEN fallback).**
+2. **LLM provider priority: OpenRouter llama-3.3-70b:free → deepseek-chat-v3-0324:free → GitHub Models (GITHUB_TOKEN fallback).**
    Cerebras is excluded — GitHub Actions (Azure IPs) are blocked by Cerebras WAF.
-   Groq, Gemini, SambaNova have been removed permanently. Do not re-add them.
+   Groq, Gemini, SambaNova, llama-4-maverick have been removed. Do not re-add them.
    GitHub Models uses the always-present `GITHUB_TOKEN` — zero-config last resort.
 
 3. **Verdict JSON schema is backwards-compatible.** `parse_verdict()` in
@@ -73,14 +73,14 @@ User keys (OPENROUTER_API_KEY 1/2/3):
   1. OpenRouter llama-3.3-70b-instruct:free  (key 1)
   2. OpenRouter llama-3.3-70b-instruct:free  (key 2)
   3. OpenRouter llama-3.3-70b-instruct:free  (key 3)
-  4. OpenRouter llama-4-maverick:free        (key 1)
-  5. OpenRouter llama-4-maverick:free        (key 2)
-  6. OpenRouter llama-4-maverick:free        (key 3)
+  4. OpenRouter deepseek-chat-v3-0324:free   (key 1)
+  5. OpenRouter deepseek-chat-v3-0324:free   (key 2)
+  6. OpenRouter deepseek-chat-v3-0324:free   (key 3)
 
 Platform keys (via OIDC → /api/llm-token, 100 scans/day):
   7. OpenRouter llama-3.3-70b-instruct:free  (platform key 1)
   8. OpenRouter llama-3.3-70b-instruct:free  (platform key 2/3)
-  9. OpenRouter llama-4-maverick:free        (platform keys)
+  9. OpenRouter deepseek-chat-v3-0324:free   (platform keys)
 
 Zero-config fallback (always present in Actions):
   10. GitHub Models meta/Llama-3.3-70B-Instruct  (GITHUB_TOKEN)

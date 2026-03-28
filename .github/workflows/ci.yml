@@ -75,12 +75,10 @@ jobs:
       - name: Run canary scan (sample.diff — cmd injection + path traversal)
         continue-on-error: true   # Metric only — never blocks CI
         env:
-          CEREBRAS_API_KEY:     ${{ secrets.CEREBRAS_API_KEY }}
-          CEREBRAS_API_KEY_2:   ${{ secrets.CEREBRAS_API_KEY_2 }}
-          CEREBRAS_API_KEY_3:   ${{ secrets.CEREBRAS_API_KEY_3 }}
           OPENROUTER_API_KEY:   ${{ secrets.OPENROUTER_API_KEY }}
           OPENROUTER_API_KEY_2: ${{ secrets.OPENROUTER_API_KEY_2 }}
           OPENROUTER_API_KEY_3: ${{ secrets.OPENROUTER_API_KEY_3 }}
+          GITHUB_TOKEN:         ${{ github.token }}
           COMMIT_SHA:           ${{ github.sha }}
           REPO:                 ${{ github.repository }}
           DIFF_PATH:            tests/fixtures/sample.diff
@@ -158,13 +156,10 @@ jobs:
         if: steps.diff.outputs.skip == 'false'
         continue-on-error: true   # Never block CI on triage failure
         env:
-          CEREBRAS_API_KEY:      ${{ secrets.CEREBRAS_API_KEY }}
-          CEREBRAS_API_KEY_2:    ${{ secrets.CEREBRAS_API_KEY_2 }}
-          CEREBRAS_API_KEY_3:    ${{ secrets.CEREBRAS_API_KEY_3 }}
           OPENROUTER_API_KEY:    ${{ secrets.OPENROUTER_API_KEY }}
           OPENROUTER_API_KEY_2:  ${{ secrets.OPENROUTER_API_KEY_2 }}
           OPENROUTER_API_KEY_3:  ${{ secrets.OPENROUTER_API_KEY_3 }}
-          GITHUB_TOKEN:          ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN:          ${{ github.token }}
           PR_NUMBER:             ${{ github.event.pull_request.number || '' }}
           COMMIT_SHA:            ${{ github.sha }}
           REPO:                  ${{ github.repository }}

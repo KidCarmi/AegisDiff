@@ -106,13 +106,11 @@ jobs:
           REPO:                 ${{ github.repository }}
           DIFF_PATH:            /tmp/aegisdiff_pr.diff
           # Optional — bring your own keys for unlimited scans
-          # Recommended: Cerebras (cerebras.ai) + OpenRouter (openrouter.ai) — free, no CC
-          CEREBRAS_API_KEY:     ${{ secrets.CEREBRAS_API_KEY }}
-          CEREBRAS_API_KEY_2:   ${{ secrets.CEREBRAS_API_KEY_2 }}
-          CEREBRAS_API_KEY_3:   ${{ secrets.CEREBRAS_API_KEY_3 }}
+          # Get free keys at openrouter.ai/keys (no credit card required)
           OPENROUTER_API_KEY:   ${{ secrets.OPENROUTER_API_KEY }}
           OPENROUTER_API_KEY_2: ${{ secrets.OPENROUTER_API_KEY_2 }}
           OPENROUTER_API_KEY_3: ${{ secrets.OPENROUTER_API_KEY_3 }}
+          # GITHUB_TOKEN is auto-injected — used as zero-config AI fallback
           # Optional — error tracking
           SENTRY_DSN:           ${{ secrets.SENTRY_DSN }}
           # Legacy — no longer needed (OIDC handles auth automatically)
