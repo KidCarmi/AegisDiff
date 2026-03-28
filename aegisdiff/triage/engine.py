@@ -30,6 +30,7 @@ def _is_test_file(file_path: str) -> bool:
     """Return True if the file is a test/spec file with no prod security risk."""
     return bool(_TEST_FILE_PATTERNS.search(file_path))
 
+
 # Verdict/severity rank used for aggregation (higher = worse / more actionable)
 _VERDICT_RANK = {
     VerdictType.TRUE_POSITIVE: 3,

@@ -808,7 +808,10 @@ class CodeContextExtractor:
             return (RUBY_SINK_PATTERNS, RUBY_SOURCE_PATTERNS, SAFE_RUBY_PATTERNS, [])
         if lang == "php":
             return (
-                PHP_SINK_PATTERNS, PHP_SOURCE_PATTERNS, SAFE_PHP_PATTERNS, PHP_SANITIZER_KEYWORDS
+                PHP_SINK_PATTERNS,
+                PHP_SOURCE_PATTERNS,
+                SAFE_PHP_PATTERNS,
+                PHP_SANITIZER_KEYWORDS,
             )
         if lang == "csharp":
             return (
