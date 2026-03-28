@@ -23,8 +23,7 @@ export default async function SettingsPage() {
   const retentionDays = (userRows[0] as any)?.scanRetentionDays ?? 30;
 
   const repoRows = await sql`
-    SELECT r.owner, r.name,
-           (r.slack_webhook_url IS NOT NULL) AS "slackConfigured"
+    SELECT r.owner, r.name
     FROM repos r
     WHERE (
       r.id IN (SELECT r2.id FROM repos r2 JOIN users u ON r2.user_id = u.id WHERE u.github_id = ${githubId})
@@ -61,45 +60,6 @@ export default async function SettingsPage() {
           Scans older than this are deleted automatically by the daily cleanup job.
         </p>
         <SettingsForm retentionDays={retentionDays} />
-      </section>
-
-      {/* Slack notifications */}
-      <section className={SECTION}>
-        <h2 className={`${SECTION_TITLE} mb-1`}>Slack Notifications</h2>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-          Get a Slack alert on every <strong>TRUE_POSITIVE</strong> detection. Configure a{" "}
-          <a
-            href="https://api.slack.com/messaging/webhooks"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-brand-blue hover:underline"
-          >
-            Slack Incoming Webhook
-          </a>{" "}
-          per repo below.
-        </p>
-        {(repoRows as any[]).length === 0 ? (
-          <p className="text-sm text-gray-400 dark:text-gray-500">No connected repos yet.</p>
-        ) : (
-          <div className="space-y-2">
-            {(repoRows as any[]).map((r) => (
-              <div
-                key={`${r.owner}/${r.name}`}
-                className="flex items-center justify-between rounded-md border border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-4 py-2"
-              >
-                <span className="font-mono text-sm text-gray-800 dark:text-gray-200">
-                  {r.owner}/{r.name}
-                </span>
-                <a
-                  href={`/repos/${r.owner}/${r.name}/slack`}
-                  className="text-xs text-brand-blue hover:underline"
-                >
-                  {r.slackConfigured ? "✓ Edit webhook" : "Add webhook"}
-                </a>
-              </div>
-            ))}
-          </div>
-        )}
       </section>
 
       {/* README Badge */}
