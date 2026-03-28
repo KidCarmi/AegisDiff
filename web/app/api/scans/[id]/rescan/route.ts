@@ -114,7 +114,7 @@ export async function POST(
     if (installation_id) {
       try {
         const jwt = await generateAppJWT();
-        const installToken = await getInstallationToken(jwt, installation_id);
+        const installToken = await getInstallationToken(jwt, Number(installation_id));
         const prResp = await fetch(
           `https://api.github.com/repos/${owner}/${name}/pulls/${pr_number}`,
           {
