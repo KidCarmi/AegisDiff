@@ -683,9 +683,13 @@ class CodeContextExtractor:
 
     def _load_tree_sitter(self, language: str):
         try:
+            import warnings
+
             from tree_sitter_languages import get_parser
 
-            parser = get_parser(language)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", FutureWarning)
+                parser = get_parser(language)
             logger.debug("tree-sitter loaded for %s", language)
             return parser
         except (ImportError, Exception) as e:
