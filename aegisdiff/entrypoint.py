@@ -60,7 +60,8 @@ def _fetch_platform_keys(ingest_url: str, oidc_token: str) -> dict:
             data = resp.json()
             logger.error(
                 "Platform key rate limit: %s (%d/%d scans today). "
-                "Add CEREBRAS_API_KEY or OPENROUTER_API_KEY to your repo secrets for unlimited scans.",
+                "Add CEREBRAS_API_KEY or OPENROUTER_API_KEY to your repo secrets "
+                "for unlimited scans.",
                 data.get("error", "limit reached"),
                 data.get("scans_today", "?"),
                 data.get("limit", 100),
