@@ -103,7 +103,6 @@ def main() -> None:
         format_summary_comment,
     )
     from .llm.orchestrator import LLMOrchestrator
-    from .llm.providers.cerebras import CerebrasProvider
     from .llm.providers.openrouter import OpenRouterProvider
     from .triage.engine import TriageEngine
     from .triage.verdicts import VerdictType
@@ -123,15 +122,6 @@ def main() -> None:
     target_repo = _get_env("TARGET_REPO")  # "owner/name"
     commit_sha = _get_env("COMMIT_SHA")
 
-    cerebras_keys = [
-        k
-        for k in [
-            os.environ.get("CEREBRAS_API_KEY", ""),
-            os.environ.get("CEREBRAS_API_KEY_2", ""),
-            os.environ.get("CEREBRAS_API_KEY_3", ""),
-        ]
-        if k
-    ]
     openrouter_keys = [
         k
         for k in [
@@ -143,10 +133,9 @@ def main() -> None:
     ingest_url = os.environ.get("AEGISDIFF_INGEST_URL", "")
     ingest_token = os.environ.get("AEGISDIFF_INGEST_TOKEN", "")
 
-    if not cerebras_keys and not openrouter_keys:
+    if not openrouter_keys:
         logger.error(
-            "No LLM API keys configured. Set CEREBRAS_API_KEY and/or OPENROUTER_API_KEY "
-            "in this repo's secrets."
+            "No LLM API keys configured. Set OPENROUTER_API_KEY in this repo's secrets."
         )
         sys.exit(1)
 
@@ -165,11 +154,9 @@ def main() -> None:
         sys.exit(0)
 
     # ── Build providers ───────────────────────────────────────────────────────
-    # Priority: Cerebras (fastest free tier) → OpenRouter (:free models)
+    # Cerebras excluded: GitHub Actions (Azure IPs) are blocked by Cerebras WAF.
+    # Priority: OpenRouter llama-3.3-70b:free → OpenRouter qwen-2.5-72b:free
     providers = []
-    for i, key in enumerate(cerebras_keys, start=1):
-        providers.append(CerebrasProvider(key))
-        logger.info("Provider: Cerebras llama-3.3-70b (key %d/%d)", i, len(cerebras_keys))
     n_or = len(openrouter_keys)
     for i, key in enumerate(openrouter_keys, start=1):
         providers.append(OpenRouterProvider(key))

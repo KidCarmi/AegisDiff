@@ -60,8 +60,7 @@ def _fetch_platform_keys(ingest_url: str, oidc_token: str) -> dict:
             data = resp.json()
             logger.error(
                 "Platform key rate limit: %s (%d/%d scans today). "
-                "Add CEREBRAS_API_KEY or OPENROUTER_API_KEY to your repo secrets "
-                "for unlimited scans.",
+                "Add OPENROUTER_API_KEY to your repo secrets for unlimited scans.",
                 data.get("error", "limit reached"),
                 data.get("scans_today", "?"),
                 data.get("limit", 100),
@@ -70,7 +69,7 @@ def _fetch_platform_keys(ingest_url: str, oidc_token: str) -> dict:
         if resp.status_code == 503:
             logger.error(
                 "AegisDiff platform keys not configured. "
-                "Add CEREBRAS_API_KEY or OPENROUTER_API_KEY to your repo secrets."
+                "Add OPENROUTER_API_KEY to your repo secrets."
             )
             return {}
         resp.raise_for_status()
@@ -170,7 +169,6 @@ def main() -> None:
         format_verdict_comment,
     )
     from .llm.orchestrator import LLMOrchestrator
-    from .llm.providers.cerebras import CerebrasProvider
     from .llm.providers.openrouter import OpenRouterProvider
     from .triage.engine import TriageEngine
     from .triage.verdicts import VerdictType
@@ -179,24 +177,13 @@ def main() -> None:
 
     cfg = load_config()
 
-    cerebras_keys = [
-        k
-        for k in [
-            cfg.cerebras_api_key,
-            cfg.cerebras_api_key_2,
-            cfg.cerebras_api_key_3,
-        ]
-        if k
-    ]
     openrouter_keys = [k for k in [cfg.openrouter_api_key, cfg.openrouter_api_key_2] if k]
 
     # ── Build provider list ────────────────────────────────────────────────
-    # Priority: Cerebras (fastest free tier) → OpenRouter (:free models)
+    # Priority: OpenRouter llama-3.3-70b:free → OpenRouter qwen-2.5-72b:free
+    # Cerebras is excluded: GitHub Actions (Azure IPs) are blocked by Cerebras WAF.
     # Platform keys via OIDC appended as fallback after user keys.
     providers = []
-    for i, key in enumerate(cerebras_keys, start=1):
-        providers.append(CerebrasProvider(key))
-        logger.info("Provider: Cerebras llama-3.3-70b (user key %d/%d)", i, len(cerebras_keys))
     n_or = len(openrouter_keys)
     for i, key in enumerate(openrouter_keys, start=1):
         providers.append(OpenRouterProvider(key))
@@ -213,11 +200,7 @@ def main() -> None:
         else:
             logger.info("Appending platform keys as fallback providers via OIDC")
         platform = _fetch_platform_keys(cfg.aegisdiff_ingest_url, oidc)
-        platform_cerebras = [k for k in platform.get("cerebras_keys", []) if k]
         platform_openrouter = [k for k in platform.get("openrouter_keys", []) if k]
-        for i, key in enumerate(platform_cerebras, start=1):
-            providers.append(CerebrasProvider(key))
-            logger.info("Provider: Cerebras (platform %d/%d)", i, len(platform_cerebras))
         n_por = len(platform_openrouter)
         for i, key in enumerate(platform_openrouter, start=1):
             providers.append(OpenRouterProvider(key))
@@ -229,7 +212,7 @@ def main() -> None:
     if not providers:
         logger.error(
             "No LLM keys available. Either:\n"
-            "  1. Add CEREBRAS_API_KEY or OPENROUTER_API_KEY to your repo secrets, or\n"
+            "  1. Add OPENROUTER_API_KEY to your repo secrets, or\n"
             "  2. Ensure AEGISDIFF_INGEST_URL is set (platform keys, 100 scans/day free)."
         )
         sys.exit(1)
