@@ -376,13 +376,9 @@ class CodeContextExtractor:
         # context window to keep total token count roughly constant.
         imported_definitions = ""
         if all_paths:
-            imported_definitions = self._resolve_imported_definitions(
-                all_paths, changed_lines
-            )
+            imported_definitions = self._resolve_imported_definitions(all_paths, changed_lines)
         context_lines = 40 if imported_definitions else 120
-        context = self._extract_surrounding_context(
-            changed_lines, max_lines_per_file=context_lines
-        )
+        context = self._extract_surrounding_context(changed_lines, max_lines_per_file=context_lines)
 
         return CodeContext(
             diff_summary=self._summarize_diff(raw_diff, changed_files),
@@ -457,9 +453,7 @@ class CodeContextExtractor:
                         content = self._file_fetcher(import_path)
                         if content:
                             self._file_cache[import_path] = content
-                            logger.info(
-                                "Fetched imported file for context: %s", import_path
-                            )
+                            logger.info("Fetched imported file for context: %s", import_path)
                     except Exception as exc:
                         logger.debug("file_fetcher failed for %s: %s", import_path, exc)
 

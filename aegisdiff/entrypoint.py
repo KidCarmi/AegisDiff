@@ -232,9 +232,7 @@ def main() -> None:
     # from disk. Pass a file_fetcher as fallback for any imported file that
     # isn't in the checkout (e.g. a path the diff parser resolved differently).
     _gh_client_for_fetch = (
-        GitHubClient(cfg.github_token, cfg.repo)
-        if cfg.github_token and cfg.repo
-        else None
+        GitHubClient(cfg.github_token, cfg.repo) if cfg.github_token and cfg.repo else None
     )
 
     def _fetch_file(path: str):

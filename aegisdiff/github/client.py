@@ -181,6 +181,7 @@ class GitHubClient:
         Returns None on any error (binary, 404, too large).
         """
         import base64
+
         url = f"{GITHUB_API_BASE}/repos/{self._repo}/contents/{path}"
         try:
             resp = httpx.get(

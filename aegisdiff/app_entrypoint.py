@@ -157,6 +157,7 @@ def main() -> None:
     # files from disk. We fetch each changed file's content via the Contents API
     # and pass it as a cache so the extractor has full file context (not just diff).
     import re as _re
+
     changed_file_paths = _re.findall(r"^\+\+\+ b/(.+)$", raw_diff, _re.MULTILINE)
     file_cache: dict = {}
     for fp in changed_file_paths:
