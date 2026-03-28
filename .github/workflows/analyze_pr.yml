@@ -73,10 +73,11 @@ jobs:
       - name: Run AegisDiff triage
         if: steps.diff.outputs.skip == 'false'
         env:
-          GEMINI_API_KEY:   ${{ secrets.GEMINI_API_KEY }}
-          GROQ_API_KEY:     ${{ secrets.GROQ_API_KEY }}
-          GROQ_API_KEY_2:   ${{ secrets.GROQ_API_KEY_2 }}
-          GROQ_API_KEY_3:   ${{ secrets.GROQ_API_KEY_3 }}
+          CEREBRAS_API_KEY:     ${{ secrets.CEREBRAS_API_KEY }}
+          CEREBRAS_API_KEY_2:   ${{ secrets.CEREBRAS_API_KEY_2 }}
+          CEREBRAS_API_KEY_3:   ${{ secrets.CEREBRAS_API_KEY_3 }}
+          OPENROUTER_API_KEY:   ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_API_KEY_2: ${{ secrets.OPENROUTER_API_KEY_2 }}
           # Use the engine PAT — needs read+write on the target repo
           GITHUB_TOKEN:     ${{ secrets.AEGISDIFF_ENGINE_TOKEN }}
           PR_NUMBER:       ${{ github.event.client_payload.pr_number }}

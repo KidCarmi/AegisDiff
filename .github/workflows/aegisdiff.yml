@@ -93,7 +93,7 @@ jobs:
       # AEGISDIFF_INGEST_URL is the only required secret.
       # LLM keys are optional — if omitted, the engine fetches platform keys
       # from AegisDiff automatically (free tier: 100 scans/day per repo).
-      # Add GEMINI_API_KEY and/or GROQ_API_KEY for unlimited scans.
+      # Add CEREBRAS_API_KEY and/or OPENROUTER_API_KEY for unlimited scans.
       - name: Run AegisDiff triage
         if: steps.diff.outputs.skip == 'false'
         id: triage
@@ -106,14 +106,12 @@ jobs:
           REPO:                 ${{ github.repository }}
           DIFF_PATH:            /tmp/aegisdiff_pr.diff
           # Optional — bring your own keys for unlimited scans
-          # Recommended: Cerebras (cerebras.ai) + SambaNova (cloud.sambanova.ai) — free, no CC
+          # Recommended: Cerebras (cerebras.ai) + OpenRouter (openrouter.ai) — free, no CC
           CEREBRAS_API_KEY:     ${{ secrets.CEREBRAS_API_KEY }}
           CEREBRAS_API_KEY_2:   ${{ secrets.CEREBRAS_API_KEY_2 }}
           CEREBRAS_API_KEY_3:   ${{ secrets.CEREBRAS_API_KEY_3 }}
           OPENROUTER_API_KEY:   ${{ secrets.OPENROUTER_API_KEY }}
-          OPENROUTER_API_KEY_2:  ${{ secrets.OPENROUTER_API_KEY_2 }}
-          GROQ_API_KEY:         ${{ secrets.GROQ_API_KEY }}
-          GEMINI_API_KEY:       ${{ secrets.GEMINI_API_KEY }}
+          OPENROUTER_API_KEY_2: ${{ secrets.OPENROUTER_API_KEY_2 }}
           # Optional — error tracking
           SENTRY_DSN:           ${{ secrets.SENTRY_DSN }}
           # Legacy — no longer needed (OIDC handles auth automatically)

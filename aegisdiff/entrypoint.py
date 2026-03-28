@@ -46,7 +46,7 @@ def _fetch_platform_keys(ingest_url: str, oidc_token: str) -> dict:
     """
     Exchange an OIDC token for AegisDiff platform LLM keys.
 
-    Returns a dict with 'gemini_key' and/or 'groq_key' on success.
+    Returns a dict with 'cerebras_keys' and/or 'openrouter_keys' on success.
     Returns {} on rate-limit (429) or any error — caller falls back to exit.
     """
     base = ingest_url.rstrip("/").removesuffix("/api/ingest")
@@ -60,7 +60,7 @@ def _fetch_platform_keys(ingest_url: str, oidc_token: str) -> dict:
             data = resp.json()
             logger.error(
                 "Platform key rate limit: %s (%d/%d scans today). "
-                "Add GEMINI_API_KEY or GROQ_API_KEY to your repo secrets for unlimited scans.",
+                "Add CEREBRAS_API_KEY or OPENROUTER_API_KEY to your repo secrets for unlimited scans.",
                 data.get("error", "limit reached"),
                 data.get("scans_today", "?"),
                 data.get("limit", 100),
@@ -69,7 +69,7 @@ def _fetch_platform_keys(ingest_url: str, oidc_token: str) -> dict:
         if resp.status_code == 503:
             logger.error(
                 "AegisDiff platform keys not configured. "
-                "Add GEMINI_API_KEY or GROQ_API_KEY to your repo secrets."
+                "Add CEREBRAS_API_KEY or OPENROUTER_API_KEY to your repo secrets."
             )
             return {}
         resp.raise_for_status()

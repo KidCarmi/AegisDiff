@@ -44,14 +44,12 @@ jobs:
           SENTRY_DSN:              ${{ secrets.SENTRY_DSN }}
           SENTRY_ENVIRONMENT:      production
 
-          # LLM providers (our secrets — keys rotate automatically on 429)
-          GEMINI_API_KEY:          ${{ secrets.GEMINI_API_KEY }}
-          GROQ_API_KEY:            ${{ secrets.GROQ_API_KEY }}
-          GROQ_API_KEY_2:          ${{ secrets.GROQ_API_KEY_2 }}
-          GROQ_API_KEY_3:          ${{ secrets.GROQ_API_KEY_3 }}
-          GROQ_API_KEY_4:          ${{ secrets.GROQ_API_KEY_4 }}
-          GROQ_API_KEY_5:          ${{ secrets.GROQ_API_KEY_5 }}
-          GROQ_API_KEY_6:          ${{ secrets.GROQ_API_KEY_6 }}
+          # LLM providers (our secrets — keys rotate automatically on 429/404)
+          CEREBRAS_API_KEY:        ${{ secrets.CEREBRAS_API_KEY }}
+          CEREBRAS_API_KEY_2:      ${{ secrets.CEREBRAS_API_KEY_2 }}
+          CEREBRAS_API_KEY_3:      ${{ secrets.CEREBRAS_API_KEY_3 }}
+          OPENROUTER_API_KEY:      ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_API_KEY_2:    ${{ secrets.OPENROUTER_API_KEY_2 }}
 
           # Target PR context (passed from webhook via client_payload)
           INSTALLATION_ID: ${{ github.event.client_payload.installation_id }}
