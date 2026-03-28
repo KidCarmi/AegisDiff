@@ -175,6 +175,36 @@ class GitHubClient:
             logger.warning("SARIF upload failed (non-fatal): %s", e)
             return False
 
+    def get_file_content(self, path: str, ref: str) -> Optional[str]:
+        """
+        Fetch raw text of a file at a specific ref via GitHub Contents API.
+        Returns None on any error (binary, 404, too large).
+        """
+        import base64
+        url = f"{GITHUB_API_BASE}/repos/{self._repo}/contents/{path}"
+        try:
+            resp = httpx.get(
+                url,
+                headers=self._headers,
+                params={"ref": ref},
+                timeout=15.0,
+            )
+        except httpx.HTTPError as exc:
+            logger.debug("Cannot fetch %s@%s: %s", path, ref[:7], exc)
+            return None
+        if not resp.is_success:
+            logger.debug("Cannot fetch %s@%s: HTTP %d", path, ref[:7], resp.status_code)
+            return None
+        data = resp.json()
+        if isinstance(data, list):
+            return None
+        if data.get("encoding") == "base64":
+            try:
+                return base64.b64decode(data["content"]).decode("utf-8", errors="replace")
+            except Exception:
+                return None
+        return None
+
     def post_commit_status(
         self,
         sha: str,

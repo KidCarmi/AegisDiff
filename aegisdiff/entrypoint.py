@@ -227,7 +227,26 @@ def main() -> None:
         sys.exit(1)
 
     orchestrator = LLMOrchestrator(providers, max_retries_per_provider=3)
-    engine = TriageEngine(orchestrator, repo_root=Path("."))
+
+    # For the manual path the repo is checked out, so the extractor reads files
+    # from disk. Pass a file_fetcher as fallback for any imported file that
+    # isn't in the checkout (e.g. a path the diff parser resolved differently).
+    _gh_client_for_fetch = (
+        GitHubClient(cfg.github_token, cfg.repo)
+        if cfg.github_token and cfg.repo
+        else None
+    )
+
+    def _fetch_file(path: str):
+        if _gh_client_for_fetch is None:
+            return None
+        return _gh_client_for_fetch.get_file_content(path, cfg.commit_sha)
+
+    engine = TriageEngine(
+        orchestrator,
+        repo_root=Path("."),
+        file_fetcher=_fetch_file,
+    )
 
     # Read diff
     diff_path = Path(cfg.diff_path)

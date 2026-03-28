@@ -27,6 +27,7 @@ import logging
 import os
 import sys
 from pathlib import Path
+from typing import Optional
 
 import httpx
 
@@ -196,7 +197,23 @@ def main() -> None:
         sys.exit(1)
 
     orchestrator = LLMOrchestrator(providers, max_retries_per_provider=3)
-    engine = TriageEngine(orchestrator, repo_root=Path("."), file_cache=file_cache)
+
+    def _fetch_file(path: str) -> Optional[str]:
+        """Fetch an imported file from GitHub for cross-file context resolution."""
+        return app_client.get_file_content(
+            token=installation_token,
+            owner=owner,
+            repo=repo_name,
+            path=path,
+            ref=commit_sha,
+        )
+
+    engine = TriageEngine(
+        orchestrator,
+        repo_root=Path("."),
+        file_cache=file_cache,
+        file_fetcher=_fetch_file,
+    )
 
     # ── Analyze ───────────────────────────────────────────────────────────────
     t0 = time.monotonic()

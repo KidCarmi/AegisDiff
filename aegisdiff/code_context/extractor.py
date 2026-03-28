@@ -21,6 +21,11 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
+from .import_resolver import (
+    extract_function_definitions,
+    extract_tainted_function_names,
+    resolve_local_imports,
+)
 from .models import (
     CodeContext,
     DataFlowEdge,
@@ -338,10 +343,14 @@ class CodeContextExtractor:
         repo_root: Path,
         language: str = "python",
         file_cache: Optional[Dict[str, str]] = None,
+        file_fetcher: Optional[callable] = None,
     ) -> None:
         self._repo_root = repo_root
         self._language = language
         self._file_cache = file_cache or {}
+        # Optional callable(path: str) -> Optional[str] for fetching files
+        # not on disk and not already in file_cache (e.g. imported files).
+        self._file_fetcher = file_fetcher
         self._ts_parser = self._load_tree_sitter(language)
 
     # ------------------------------------------------------------------
@@ -361,7 +370,19 @@ class CodeContextExtractor:
             all_paths.extend(paths)
 
         snippet = self._extract_diff_snippet(raw_diff, max_lines=200)
-        context = self._extract_surrounding_context(changed_lines, max_lines_per_file=30)
+
+        # Resolve cross-file imports only when sinks were found (has_paths).
+        # When imported_definitions are present we tighten the surrounding
+        # context window to keep total token count roughly constant.
+        imported_definitions = ""
+        if all_paths:
+            imported_definitions = self._resolve_imported_definitions(
+                all_paths, changed_lines
+            )
+        context_lines = 40 if imported_definitions else 120
+        context = self._extract_surrounding_context(
+            changed_lines, max_lines_per_file=context_lines
+        )
 
         return CodeContext(
             diff_summary=self._summarize_diff(raw_diff, changed_files),
@@ -369,6 +390,7 @@ class CodeContextExtractor:
             paths=all_paths,
             raw_diff_snippet=snippet,
             supporting_context=context,
+            imported_definitions=imported_definitions,
         )
 
     # ------------------------------------------------------------------
@@ -392,6 +414,70 @@ class CodeContextExtractor:
             return self._file_cache[file_path]
         logger.debug("File not available (not on disk, not in cache): %s", file_path)
         return None
+
+    # ------------------------------------------------------------------
+    # Cross-file import resolution
+    # ------------------------------------------------------------------
+
+    def _resolve_imported_definitions(
+        self,
+        paths: List[DataFlowPath],
+        changed_lines: Dict[str, List[range]],
+    ) -> str:
+        """
+        For each function call in the taint paths, attempt to resolve it to a
+        local imported file and extract its body. Returns a formatted string
+        for LLM prompt injection, or "" if nothing was resolved.
+        """
+        func_names = extract_tainted_function_names(paths)
+        if not func_names:
+            return ""
+
+        all_definitions: List[str] = []
+        seen_files: set = set()
+
+        for file_path in changed_lines:
+            source_code = self._read_file(file_path)
+            if not source_code:
+                continue
+
+            candidates = resolve_local_imports(source_code, func_names, file_path)
+            if not candidates:
+                continue
+
+            for func_name, import_path in candidates.items():
+                if import_path in seen_files:
+                    continue
+                # Fetch the imported file: cache → disk → file_fetcher
+                content = self._file_cache.get(import_path)
+                if content is None:
+                    content = self._read_file(import_path)
+                if content is None and self._file_fetcher is not None:
+                    try:
+                        content = self._file_fetcher(import_path)
+                        if content:
+                            self._file_cache[import_path] = content
+                            logger.info(
+                                "Fetched imported file for context: %s", import_path
+                            )
+                    except Exception as exc:
+                        logger.debug("file_fetcher failed for %s: %s", import_path, exc)
+
+                if content is None:
+                    logger.debug("Cannot resolve import: %s", import_path)
+                    continue
+
+                defs = extract_function_definitions(
+                    content,
+                    [func_name],
+                    import_path,
+                    max_lines_per_func=20,
+                )
+                if defs:
+                    all_definitions.append(defs)
+                    seen_files.add(import_path)
+
+        return "\n\n".join(all_definitions)
 
     # ------------------------------------------------------------------
     # Diff parsing

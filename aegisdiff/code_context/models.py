@@ -63,4 +63,5 @@ class CodeContext:
     changed_files: List[str]
     paths: List[DataFlowPath]
     raw_diff_snippet: str  # Actual +/- lines, capped at 200 lines
-    supporting_context: str  # ±5 lines of surrounding unchanged code
+    supporting_context: str  # ±25 lines of surrounding unchanged code
+    imported_definitions: str = ""  # Function bodies fetched from imported local files

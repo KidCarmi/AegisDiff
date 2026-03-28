@@ -50,11 +50,13 @@ class TriageEngine:
         repo_root: Path,
         language: str = "python",
         file_cache: Optional[Dict[str, str]] = None,
+        file_fetcher: Optional[callable] = None,
     ) -> None:
         self._orchestrator = orchestrator
         self._repo_root = repo_root
         self._language = language
         self._file_cache = file_cache or {}
+        self._file_fetcher = file_fetcher
 
     def analyze_diff(self, raw_diff: str) -> Verdict:
         """
@@ -71,7 +73,9 @@ class TriageEngine:
             return Verdict.no_op()
 
         try:
-            extractor = CodeContextExtractor(self._repo_root, self._language, self._file_cache)
+            extractor = CodeContextExtractor(
+                self._repo_root, self._language, self._file_cache, self._file_fetcher
+            )
             context = extractor.extract_from_diff(raw_diff)
 
             if not context.raw_diff_snippet.strip():

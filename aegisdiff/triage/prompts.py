@@ -65,6 +65,12 @@ CALIBRATION RULES
 - Do NOT invent vulnerabilities outside the provided diff and code context. \
   Only analyze what you are given.
 
+IMPORTED DEFINITIONS
+When an "IMPORTED DEFINITIONS" section is provided, it shows the actual source \
+code of functions called in the diff (fetched from the local codebase). Use them \
+to verify whether a function that sounds like a sanitizer actually sanitizes. \
+A function named sanitize_input that returns its input unchanged is NOT a sanitizer.
+
 ANTI-PATTERNS TO IGNORE (these are almost always false positives)
 - SQL queries using ORM query builders (.filter(), .where(), .select_related(), \
   .annotate(), bindparam())
@@ -115,16 +121,25 @@ DATA FLOW PATH {i}:
     if not paths_text:
         paths_text = "No explicit data-flow paths extracted. Analyze the diff heuristically."
 
+    imported_block = ""
+    if context.imported_definitions:
+        imported_block = f"""\
+
+--- IMPORTED DEFINITIONS (actual implementations of functions in the taint path) ---
+{context.imported_definitions}
+"""
+
     return f"""\
 DIFF SUMMARY: {context.diff_summary}
 CHANGED FILES: {", ".join(context.changed_files) if context.changed_files else "(none)"}
 
 {paths_text}
 <<<CODE>>>
+{imported_block}\
 --- RAW DIFF (changed lines only, max 200 lines) ---
 {context.raw_diff_snippet}
 
---- SURROUNDING CONTEXT (±5 lines per changed line) ---
+--- SURROUNDING CONTEXT (±25 lines per changed line) ---
 {context.supporting_context}
 <<<END_CODE>>>
 
