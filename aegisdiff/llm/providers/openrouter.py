@@ -32,7 +32,7 @@ _TOO_LARGE_PHRASES = (
 class OpenRouterProvider(LLMProvider):
     name = "openrouter"
     # ':free' suffix = always free, no credits consumed
-    model = "meta-llama/llama-3.3-70b-instruct:free"
+    model = "meta-llama/llama-3.3-70b-instruct:free"  # default primary model
     max_context_tokens = 6_000  # Conservative below free-tier burst limit
 
     def __init__(self, api_key: str, model: str | None = None) -> None:

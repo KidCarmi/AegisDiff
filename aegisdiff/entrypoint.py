@@ -180,7 +180,7 @@ def main() -> None:
     openrouter_keys = [k for k in [cfg.openrouter_api_key, cfg.openrouter_api_key_2] if k]
 
     # ── Build provider list ────────────────────────────────────────────────
-    # Priority: OpenRouter llama-3.3-70b:free → OpenRouter qwen-2.5-72b:free
+    # Priority: OpenRouter llama-3.3-70b:free → OpenRouter llama-4-maverick:free
     # Cerebras is excluded: GitHub Actions (Azure IPs) are blocked by Cerebras WAF.
     # Platform keys via OIDC appended as fallback after user keys.
     providers = []
@@ -190,8 +190,8 @@ def main() -> None:
         logger.info("Provider: OpenRouter llama-3.3-70b:free (user key %d/%d)", i, n_or)
     # Secondary OpenRouter model per key — less congested free-tier fallback
     for i, key in enumerate(openrouter_keys, start=1):
-        providers.append(OpenRouterProvider(key, model="qwen/qwen-2.5-72b-instruct:free"))
-        logger.info("Provider: OpenRouter qwen-2.5-72b:free (user key %d/%d)", i, n_or)
+        providers.append(OpenRouterProvider(key, model="meta-llama/llama-4-maverick:free"))
+        logger.info("Provider: OpenRouter llama-4-maverick:free (user key %d/%d)", i, n_or)
 
     oidc = _get_oidc_token()
     if oidc and cfg.aegisdiff_ingest_url:
@@ -206,8 +206,8 @@ def main() -> None:
             providers.append(OpenRouterProvider(key))
             logger.info("Provider: OpenRouter llama-3.3-70b:free (platform %d/%d)", i, n_por)
         for i, key in enumerate(platform_openrouter, start=1):
-            providers.append(OpenRouterProvider(key, model="qwen/qwen-2.5-72b-instruct:free"))
-            logger.info("Provider: OpenRouter qwen-2.5-72b:free (platform %d/%d)", i, n_por)
+            providers.append(OpenRouterProvider(key, model="meta-llama/llama-4-maverick:free"))
+            logger.info("Provider: OpenRouter llama-4-maverick:free (platform %d/%d)", i, n_por)
 
     if not providers:
         logger.error(

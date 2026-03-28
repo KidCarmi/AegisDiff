@@ -35,7 +35,7 @@ scripts/         local_scan.py for manual testing
    severity, CWE ID, confidence, title, provider, timing. No code, no diffs, no
    evidence strings. Evidence lives ONLY in the GitHub PR comment.
 
-2. **LLM provider priority is OpenRouter llama-3.3-70b:free first, OpenRouter qwen-2.5-72b:free second.**
+2. **LLM provider priority is OpenRouter llama-3.3-70b:free first, OpenRouter llama-4-maverick:free second.**
    Cerebras is excluded — GitHub Actions (Azure IPs) are blocked by Cerebras WAF.
    Gemini and Groq have been removed. Do not re-add them.
 
@@ -149,7 +149,7 @@ npm run build                   # Production build
 | File | Purpose |
 |---|---|
 | `aegisdiff/llm/orchestrator.py` | Failover + retry + adaptive 413 trimming |
-| `aegisdiff/llm/providers/openrouter.py` | OpenRouter :free models (llama-3.3-70b, qwen-2.5-72b) |
+| `aegisdiff/llm/providers/openrouter.py` | OpenRouter :free models (llama-3.3-70b primary, llama-4-maverick fallback) |
 | `aegisdiff/llm/providers/cerebras.py` | Cerebras (kept on disk, NOT wired in — Azure IP blocked) |
 | `aegisdiff/code_context/extractor.py` | AST sink/source detection (Python/JS/TS/Go/Java/Ruby/PHP) |
 | `aegisdiff/triage/prompts.py` | Cynical AppSec system prompt |

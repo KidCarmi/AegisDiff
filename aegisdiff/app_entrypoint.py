@@ -153,7 +153,7 @@ def main() -> None:
 
     # ── Build providers ───────────────────────────────────────────────────────
     # Cerebras excluded: GitHub Actions (Azure IPs) are blocked by Cerebras WAF.
-    # Priority: OpenRouter llama-3.3-70b:free → OpenRouter qwen-2.5-72b:free
+    # Priority: OpenRouter llama-3.3-70b:free → OpenRouter llama-4-maverick:free
     providers = []
     n_or = len(openrouter_keys)
     for i, key in enumerate(openrouter_keys, start=1):
@@ -161,8 +161,8 @@ def main() -> None:
         logger.info("Provider: OpenRouter llama-3.3-70b:free (key %d/%d)", i, n_or)
     # Secondary model per key — less congested free-tier fallback
     for i, key in enumerate(openrouter_keys, start=1):
-        providers.append(OpenRouterProvider(key, model="qwen/qwen-2.5-72b-instruct:free"))
-        logger.info("Provider: OpenRouter qwen-2.5-72b:free (key %d/%d)", i, n_or)
+        providers.append(OpenRouterProvider(key, model="meta-llama/llama-4-maverick:free"))
+        logger.info("Provider: OpenRouter llama-4-maverick:free (key %d/%d)", i, n_or)
 
     orchestrator = LLMOrchestrator(providers, max_retries_per_provider=3)
     engine = TriageEngine(orchestrator, repo_root=Path("."))
