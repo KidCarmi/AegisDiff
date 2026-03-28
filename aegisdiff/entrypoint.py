@@ -60,7 +60,7 @@ def _fetch_platform_keys(ingest_url: str, oidc_token: str) -> dict:
             data = resp.json()
             logger.error(
                 "Platform key rate limit: %s (%d/%d scans today). "
-                "Add OPENROUTER_API_KEY to your repo secrets for unlimited scans.",
+                "Add OPENROUTER_API_KEY or GROQ_API_KEY to your repo secrets for unlimited scans.",
                 data.get("error", "limit reached"),
                 data.get("scans_today", "?"),
                 data.get("limit", 100),
@@ -69,7 +69,7 @@ def _fetch_platform_keys(ingest_url: str, oidc_token: str) -> dict:
         if resp.status_code == 503:
             logger.error(
                 "AegisDiff platform keys not configured. "
-                "Add OPENROUTER_API_KEY to your repo secrets."
+                "Add OPENROUTER_API_KEY or GROQ_API_KEY to your repo secrets."
             )
             return {}
         resp.raise_for_status()
@@ -233,7 +233,7 @@ def main() -> None:
     if not providers:
         logger.error(
             "No LLM keys available. Either:\n"
-            "  1. Add OPENROUTER_API_KEY to your repo secrets, or\n"
+            "  1. Add OPENROUTER_API_KEY or GROQ_API_KEY to your repo secrets, or\n"
             "  2. Ensure AEGISDIFF_INGEST_URL is set (platform keys, 100 scans/day free)."
         )
         sys.exit(1)

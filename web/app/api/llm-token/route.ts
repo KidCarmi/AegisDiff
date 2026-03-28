@@ -87,7 +87,7 @@ export async function GET(req: NextRequest) {
       {
         error:
           `Rate limit reached: ${effectiveLimit} scans/day. ` +
-          `Add OPENROUTER_API_KEY to your repo secrets for unlimited scans.`,
+          `Add OPENROUTER_API_KEY or GROQ_API_KEY to your repo secrets for unlimited scans.`,
         scans_today: countBefore,
         limit: effectiveLimit,
       },

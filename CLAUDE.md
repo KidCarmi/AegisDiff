@@ -18,7 +18,7 @@ This is a hard requirement. Every architectural decision must preserve this.
 ```
 aegisdiff/              Python triage engine
   github/               GitHub API clients (client.py + app_client.py)
-  llm/providers/        openrouter.py, github_models.py, cerebras.py (unused)
+  llm/providers/        openrouter.py, groq.py, github_models.py, cerebras.py (unused)
   triage/               engine.py, verdicts.py, prompts.py, sarif.py
   code_context/         extractor.py (AST sink/source), models.py
   cache/                gist_cache.py (optional ephemeral cache)
@@ -28,13 +28,11 @@ web/                    Next.js 14 App Router dashboard (Vercel)
   middleware.ts          Route protection (session + admin guard)
   instrumentation.ts     Sentry init + DB migrations on cold start
 landing/                Static landing page (Cloudflare Pages)
-tests/                  12 test files, ~231 tests, 10 security fixtures
+tests/                  13 test files, ~263 tests, 10 security fixtures
 scripts/                local_scan.py for manual testing
 .github/
   workflows/
-    aegisdiff.yml        User-facing triage workflow (manual setup path)
     aegisdiff-app.yml    GitHub App path (repository_dispatch from webhook)
-    analyze_pr.yml       Legacy PAT-based dispatch (superseded by aegisdiff-app.yml)
     ci.yml               Canary + self-scan + lint/test (this repo's CI)
     security.yml         SAST/SCA pipeline (Semgrep, Bandit, Trivy, Gitleaks)
     cleanup.yml          Daily DB retention cleanup (cron)
@@ -46,9 +44,12 @@ scripts/                local_scan.py for manual testing
    severity, CWE ID, confidence, title, provider, timing. No code, no diffs, no
    evidence strings. Evidence lives ONLY in the GitHub PR comment.
 
-2. **LLM provider priority: OpenRouter llama-3.3-70b:free → OpenRouter gemma-3-27b-it:free → GitHub Models (GITHUB_TOKEN fallback).**
+2. **LLM provider priority: OpenRouter llama-3.3-70b:free → OpenRouter gemma-3-27b-it:free → Groq llama-3.3-70b-versatile → GitHub Models (GITHUB_TOKEN fallback).**
    Cerebras is excluded — GitHub Actions (Azure IPs) are blocked by Cerebras WAF.
-   Groq, Gemini, SambaNova, llama-4-maverick, deepseek-chat-v3-0324, mistral-7b-instruct have been removed. Do not re-add them.
+   Groq is active and wired in (free tier, no training on requests, no Azure IP block).
+   Gemini, SambaNova, llama-4-maverick, deepseek-chat-v3-0324, mistral-7b-instruct have been removed. Do not re-add them.
+   Mistral La Plateforme free tier trains on requests — disqualified for a security scanner.
+   Gemini free tier trains on requests — disqualified for a security scanner.
    GitHub Models model ID is bare name: `Llama-3.3-70B-Instruct` (NOT `meta/Llama-3.3-70B-Instruct` — namespace prefix causes 400).
    GitHub Models uses the always-present `GITHUB_TOKEN` — zero-config last resort.
 
@@ -81,27 +82,34 @@ scripts/                local_scan.py for manual testing
 ## LLM Provider Stack (in priority order)
 
 ```
-User keys (OPENROUTER_API_KEY 1/2/3):
+User keys (OPENROUTER_API_KEY 1/2/3, GROQ_API_KEY 1/2/3):
   1. OpenRouter llama-3.3-70b-instruct:free  (key 1)
   2. OpenRouter llama-3.3-70b-instruct:free  (key 2)
   3. OpenRouter llama-3.3-70b-instruct:free  (key 3)
-  4. OpenRouter gemma-3-27b-it:free     (key 1)
-  5. OpenRouter gemma-3-27b-it:free     (key 2)
-  6. OpenRouter gemma-3-27b-it:free     (key 3)
+  4. OpenRouter gemma-3-27b-it:free          (key 1)
+  5. OpenRouter gemma-3-27b-it:free          (key 2)
+  6. OpenRouter gemma-3-27b-it:free          (key 3)
+  7. Groq llama-3.3-70b-versatile            (key 1)
+  8. Groq llama-3.3-70b-versatile            (key 2)
+  9. Groq llama-3.3-70b-versatile            (key 3)
 
 Platform keys (via OIDC → /api/llm-token, 100 scans/day):
-  7. OpenRouter llama-3.3-70b-instruct:free  (platform key 1)
-  8. OpenRouter llama-3.3-70b-instruct:free  (platform key 2)
-  9. OpenRouter llama-3.3-70b-instruct:free  (platform key 3)
-  10. OpenRouter gemma-3-27b-it:free           (platform key 1)
-  11. OpenRouter gemma-3-27b-it:free           (platform key 2)
-  12. OpenRouter gemma-3-27b-it:free           (platform key 3)
+  10. OpenRouter llama-3.3-70b-instruct:free  (platform key 1)
+  11. OpenRouter llama-3.3-70b-instruct:free  (platform key 2)
+  12. OpenRouter llama-3.3-70b-instruct:free  (platform key 3)
+  13. OpenRouter gemma-3-27b-it:free          (platform key 1)
+  14. OpenRouter gemma-3-27b-it:free          (platform key 2)
+  15. OpenRouter gemma-3-27b-it:free          (platform key 3)
+  16. Groq llama-3.3-70b-versatile            (platform key 1)
+  17. Groq llama-3.3-70b-versatile            (platform key 2)
+  18. Groq llama-3.3-70b-versatile            (platform key 3)
 
 Zero-config fallback (always present in Actions):
-  13. GitHub Models Llama-3.3-70B-Instruct  (GITHUB_TOKEN)
+  19. GitHub Models Llama-3.3-70B-Instruct  (GITHUB_TOKEN)
 ```
 
-Rate limits: OpenRouter free tier = 8 req/min per key per model.
+Rate limits: OpenRouter free tier = 8 req/min per key per model (~200 RPD).
+Groq free tier = 30 req/min per key (~14,400 RPD). Does NOT train on requests.
 GitHub Models: conservative RPM, but always available as absolute last resort.
 
 ## RBAC Model
@@ -188,10 +196,11 @@ npm run build                   # Production build
 | File | Purpose |
 |---|---|
 | `aegisdiff/llm/orchestrator.py` | Failover + retry + adaptive 413 trimming |
-| `aegisdiff/llm/providers/openrouter.py` | OpenRouter :free models (llama-3.3-70b primary, gemma-3-9b-it secondary) |
+| `aegisdiff/llm/providers/openrouter.py` | OpenRouter :free models (llama-3.3-70b primary, gemma-3-27b-it secondary) |
+| `aegisdiff/llm/providers/groq.py` | Groq llama-3.3-70b-versatile (free tier, no training, 30 RPM / 14k RPD) |
 | `aegisdiff/llm/providers/github_models.py` | GitHub Models (GITHUB_TOKEN, zero-config last-resort fallback) |
 | `aegisdiff/llm/providers/cerebras.py` | Cerebras (kept on disk, NOT wired in — Azure IP blocked) |
-| `aegisdiff/code_context/extractor.py` | AST sink/source detection (Python/JS/TS/Go/Java/Ruby/PHP) |
+| `aegisdiff/code_context/extractor.py` | AST sink/source detection (Python/JS/TS/Go/Java/Ruby/PHP/C#) |
 | `aegisdiff/triage/prompts.py` | Cynical AppSec system prompt |
 | `aegisdiff/triage/verdicts.py` | Verdict parsing + calibration rules |
 | `aegisdiff/triage/sarif.py` | SARIF 2.1.0 builder for GitHub Code Scanning upload |
@@ -200,8 +209,7 @@ npm run build                   # Production build
 | `aegisdiff/github/client.py` | GitHub API: PR comments + inline review comments + SARIF upload |
 | `aegisdiff/github/app_client.py` | GitHub App installation token + diff fetch + review + SARIF upload |
 | `aegisdiff/sentry.py` | Sentry init helper (no-op without SENTRY_DSN) |
-| `aegisdiff/config.py` | All env var loading (OPENROUTER_API_KEY 1/2/3, GITHUB_TOKEN) |
-| `.github/workflows/aegisdiff.yml` | User-facing triage workflow (manual setup path) |
+| `aegisdiff/config.py` | All env var loading (OPENROUTER_API_KEY 1/2/3, GROQ_API_KEY 1/2/3, GITHUB_TOKEN) |
 | `.github/workflows/aegisdiff-app.yml` | GitHub App path workflow (repository_dispatch) |
 | `web/app/api/ingest/route.ts` | Receives scan metadata, fires webhooks |
 | `web/app/api/llm-token/route.ts` | Platform key distribution — 100 scans/day limit |
@@ -291,7 +299,8 @@ Users need zero secrets. The engine fetches platform LLM keys from `/api/llm-tok
 via OIDC. Rate limit: **100 scans/day** per repo. User-provided keys always win.
 
 Vercel env vars required: `PLATFORM_OPENROUTER_API_KEY`, `PLATFORM_OPENROUTER_API_KEY_2`,
-`PLATFORM_OPENROUTER_API_KEY_3`, `PLATFORM_ADMIN_GITHUB_IDS`.
+`PLATFORM_OPENROUTER_API_KEY_3`, `PLATFORM_GROQ_API_KEY`, `PLATFORM_GROQ_API_KEY_2`,
+`PLATFORM_GROQ_API_KEY_3`, `PLATFORM_ADMIN_GITHUB_IDS`.
 
 ### ✅ Phase 1 — RBAC (COMPLETE)
 
@@ -309,7 +318,10 @@ in `tests/test_pr_comment.py`.
 ### ✅ Phase 3 — Per-Hunk Analysis (COMPLETE)
 
 Each changed file analyzed independently. Results aggregated (highest severity wins).
-`analyze_diff_chunked()` in `engine.py` splits by `diff --git` headers.
+`analyze_diff_chunked()` in `engine.py` splits by `diff --git` headers, then further
+splits each file's diff into sub-hunks of ≤ 150 lines (`_split_file_diff_into_hunks`).
+This ensures vulnerabilities in lines 201+ of large changed files are never missed.
+Cap: `_MAX_CHUNKS_PER_PR = 20` sub-chunks per PR to protect daily quota.
 `entrypoint.py` uses chunked mode when diff > 100 lines (`CHUNKED_DIFF_THRESHOLD`).
 Ingest accepts array payloads — one DB row per finding per PR.
 
@@ -364,7 +376,7 @@ Changes must:
 2. Set `name`, `model`, `max_context_tokens` class attributes
 3. Implement `complete(request) -> LLMResponse` and `is_retryable_error(exc) -> bool`
 4. Ensure `is_retryable_error` returns `False` for 413 (orchestrator handles it)
-5. Add to provider list in `aegisdiff/entrypoint.py` (after OpenRouter, before GitHub Models)
-6. If key needed: add to `aegisdiff/config.py` and update `PLATFORM_*` env vars in Vercel
-7. Update `.github/workflows/aegisdiff.yml` env vars
+5. Add to provider list in `aegisdiff/entrypoint.py` and `aegisdiff/app_entrypoint.py` (after OpenRouter/Groq, before GitHub Models)
+6. If key needed: add to `aegisdiff/config.py`, update `PLATFORM_*` env vars in Vercel, and add to `/api/llm-token/route.ts` response
+7. Update `.github/workflows/aegisdiff-app.yml` and `.github/workflows/ci.yml` env vars
 8. GitHub Models needs no extra steps — GITHUB_TOKEN is always available
