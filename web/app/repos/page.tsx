@@ -97,7 +97,7 @@ export default async function ReposPage() {
             className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
             + Install GitHub App
           </a>
-          <a href="/repos/connect"
+          <a href="/onboarding"
             className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700">
             + Manual Connect
           </a>
@@ -116,7 +116,7 @@ export default async function ReposPage() {
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
               Install GitHub App (recommended)
             </a>
-            <a href="/repos/connect"
+            <a href="/onboarding"
               className="rounded-lg border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800">
               Manual setup
             </a>

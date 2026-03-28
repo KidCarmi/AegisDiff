@@ -9,9 +9,6 @@ from typing import Optional
 
 @dataclass(frozen=True)
 class Config:
-    cerebras_api_key: str
-    cerebras_api_key_2: str
-    cerebras_api_key_3: str
     openrouter_api_key: str
     openrouter_api_key_2: str
     github_token: str
@@ -30,9 +27,6 @@ def load_config() -> Config:
     pr_number = int(pr_str) if pr_str.isdigit() else None
 
     return Config(
-        cerebras_api_key=os.environ.get("CEREBRAS_API_KEY", ""),
-        cerebras_api_key_2=os.environ.get("CEREBRAS_API_KEY_2", ""),
-        cerebras_api_key_3=os.environ.get("CEREBRAS_API_KEY_3", ""),
         openrouter_api_key=os.environ.get("OPENROUTER_API_KEY", ""),
         openrouter_api_key_2=os.environ.get("OPENROUTER_API_KEY_2", ""),
         github_token=os.environ.get("GITHUB_TOKEN", ""),

@@ -35,8 +35,9 @@ scripts/         local_scan.py for manual testing
    severity, CWE ID, confidence, title, provider, timing. No code, no diffs, no
    evidence strings. Evidence lives ONLY in the GitHub PR comment.
 
-2. **LLM provider priority is Gemini first, Groq second.** This order is set in
-   `aegisdiff/entrypoint.py` and must not be reversed.
+2. **LLM provider priority is OpenRouter llama-3.3-70b:free first, OpenRouter qwen-2.5-72b:free second.**
+   Cerebras is excluded — GitHub Actions (Azure IPs) are blocked by Cerebras WAF.
+   Gemini and Groq have been removed. Do not re-add them.
 
 3. **Verdict JSON schema is backwards-compatible.** `parse_verdict()` in
    `aegisdiff/triage/verdicts.py` must always handle missing keys gracefully.
@@ -148,8 +149,8 @@ npm run build                   # Production build
 | File | Purpose |
 |---|---|
 | `aegisdiff/llm/orchestrator.py` | Failover + retry + adaptive 413 trimming |
-| `aegisdiff/llm/providers/groq.py` | Groq (max_context_tokens = 5,500) |
-| `aegisdiff/llm/providers/gemini.py` | Gemini (max_context_tokens = 900k) |
+| `aegisdiff/llm/providers/openrouter.py` | OpenRouter :free models (llama-3.3-70b, qwen-2.5-72b) |
+| `aegisdiff/llm/providers/cerebras.py` | Cerebras (kept on disk, NOT wired in — Azure IP blocked) |
 | `aegisdiff/code_context/extractor.py` | AST sink/source detection (Python/JS/TS/Go/Java/Ruby/PHP) |
 | `aegisdiff/triage/prompts.py` | Cynical AppSec system prompt |
 | `aegisdiff/triage/verdicts.py` | Verdict parsing + calibration rules |
@@ -158,7 +159,7 @@ npm run build                   # Production build
 | `aegisdiff/github/client.py` | GitHub API: PR comments + inline review comments |
 | `aegisdiff/github/app_client.py` | GitHub App installation token + diff fetch + review |
 | `aegisdiff/sentry.py` | Sentry init helper (no-op without SENTRY_DSN) |
-| `aegisdiff/config.py` | All env var loading (incl. GROQ_API_KEY_2/3/4) |
+| `aegisdiff/config.py` | All env var loading (OPENROUTER_API_KEY, OPENROUTER_API_KEY_2) |
 | `.github/workflows/aegisdiff.yml` | User-facing triage workflow (manual setup path) |
 | `.github/workflows/aegisdiff-app.yml` | GitHub App path workflow (repository_dispatch) |
 | `web/app/api/ingest/route.ts` | Receives scan metadata, fires webhooks |
@@ -228,8 +229,8 @@ Work through phases in order. All tests must pass before starting the next phase
 Users need zero secrets. The engine fetches platform LLM keys from `/api/llm-token`
 via OIDC. Rate limit: **100 scans/day** per repo. User-provided keys always win.
 
-Vercel env vars required: `PLATFORM_GEMINI_API_KEY`, `PLATFORM_GROQ_API_KEY`,
-`PLATFORM_GROQ_API_KEY_2/3/4` (4-key pool), `PLATFORM_ADMIN_GITHUB_IDS`.
+Vercel env vars required: `PLATFORM_OPENROUTER_API_KEY`, `PLATFORM_OPENROUTER_API_KEY_2`,
+`PLATFORM_ADMIN_GITHUB_IDS`.
 
 ### ✅ Phase 1 — RBAC (COMPLETE)
 
@@ -294,7 +295,7 @@ Changes must:
 2. Set `name`, `model`, `max_context_tokens` class attributes
 3. Implement `complete(request) -> LLMResponse` and `is_retryable_error(exc) -> bool`
 4. Ensure `is_retryable_error` returns `False` for 413 (orchestrator handles it)
-5. Add to provider list in `aegisdiff/entrypoint.py` (after Groq)
+5. Add to provider list in `aegisdiff/entrypoint.py` (after OpenRouter)
 6. Add API key to `aegisdiff/config.py`
 7. Add key to `PLATFORM_*` env vars in Vercel
 8. Update `.github/workflows/aegisdiff.yml` env vars

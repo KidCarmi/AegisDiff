@@ -163,7 +163,7 @@ function StepChoose({
                 </span>
               </div>
               <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
-                Copy a workflow file into your repo. Bring your own Gemini or Groq API keys.
+                Copy a workflow file into your repo. Bring your own OpenRouter API key (free).
                 Full control over every step.
               </p>
               <div className="mt-3 flex gap-2 flex-wrap">
@@ -270,19 +270,13 @@ function StepManualSetup({ ingestUrl, onDone }: { ingestUrl: string; onDone: () 
           </div>
           <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
             Get a free key from{" "}
-            <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
-              Google AI Studio
+            <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+              OpenRouter
             </a>{" "}
-            (Gemini) or{" "}
-            <a href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
-              Groq Console
-            </a>
-            . Add it as a secret in your repo.
+            (no credit card required). Add it as a secret in your repo.
           </p>
           <div className="flex gap-2 flex-wrap">
-            <code className="rounded-md bg-gray-100 dark:bg-gray-800 px-2 py-1 text-xs font-mono text-gray-700 dark:text-gray-200">GEMINI_API_KEY</code>
-            <span className="text-xs text-gray-400 dark:text-gray-500 self-center">or</span>
-            <code className="rounded-md bg-gray-100 dark:bg-gray-800 px-2 py-1 text-xs font-mono text-gray-700 dark:text-gray-200">GROQ_API_KEY</code>
+            <code className="rounded-md bg-gray-100 dark:bg-gray-800 px-2 py-1 text-xs font-mono text-gray-700 dark:text-gray-200">OPENROUTER_API_KEY</code>
           </div>
         </div>
 
