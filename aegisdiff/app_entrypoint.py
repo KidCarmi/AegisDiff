@@ -103,6 +103,7 @@ def main() -> None:
         format_summary_comment,
     )
     from .llm.orchestrator import LLMOrchestrator
+    from .llm.platform_keys import fetch_platform_keys, get_oidc_token
     from .llm.providers.github_models import GitHubModelsProvider
     from .llm.providers.groq import GroqProvider
     from .llm.providers.openrouter import OpenRouterProvider
@@ -201,6 +202,28 @@ def main() -> None:
     for i, key in enumerate(groq_keys, start=1):
         providers.append(GroqProvider(key))
         logger.info("Provider: Groq llama-3.3-70b-versatile (key %d/%d)", i, len(groq_keys))
+
+    # ── Platform keys via OIDC (Vercel → /api/llm-token) ─────────────────────
+    # Appended AFTER direct secrets so operator keys always take priority.
+    # This adds the platform OpenRouter + Groq pool as an extra buffer before
+    # falling to GitHub Models — critical when all direct keys are 429'd.
+    oidc = get_oidc_token()
+    if oidc and ingest_url:
+        logger.info("Appending platform keys as fallback providers via OIDC")
+        platform = fetch_platform_keys(ingest_url, oidc)
+        platform_openrouter = [k for k in platform.get("openrouter_keys", []) if k]
+        n_por = len(platform_openrouter)
+        for i, key in enumerate(platform_openrouter, start=1):
+            providers.append(OpenRouterProvider(key))
+            logger.info("Provider: OpenRouter llama-3.3-70b:free (platform %d/%d)", i, n_por)
+        for i, key in enumerate(platform_openrouter, start=1):
+            providers.append(OpenRouterProvider(key, model="google/gemma-3-27b-it:free"))
+            logger.info("Provider: OpenRouter gemma-3-27b:free (platform %d/%d)", i, n_por)
+        platform_groq = [k for k in platform.get("groq_keys", []) if k]
+        n_pg = len(platform_groq)
+        for i, key in enumerate(platform_groq, start=1):
+            providers.append(GroqProvider(key))
+            logger.info("Provider: Groq llama-3.3-70b-versatile (platform %d/%d)", i, n_pg)
 
     # ── GitHub Models — zero-config last-resort fallback ─────────────────────
     # GITHUB_APP_PRIVATE_KEY signs JWTs — but the Actions GITHUB_TOKEN also works
