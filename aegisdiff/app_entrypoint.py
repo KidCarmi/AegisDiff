@@ -134,9 +134,7 @@ def main() -> None:
     ingest_token = os.environ.get("AEGISDIFF_INGEST_TOKEN", "")
 
     if not openrouter_keys:
-        logger.error(
-            "No LLM API keys configured. Set OPENROUTER_API_KEY in this repo's secrets."
-        )
+        logger.error("No LLM API keys configured. Set OPENROUTER_API_KEY in this repo's secrets.")
         sys.exit(1)
 
     owner, repo_name = target_repo.split("/", 1)
