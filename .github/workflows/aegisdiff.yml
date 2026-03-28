@@ -30,6 +30,7 @@ permissions:
   issues: write
   id-token: write        # Required for GitHub Actions OIDC (zero-config dashboard auth)
   security-events: write # Required for GitHub Code Scanning SARIF upload
+  models: read           # Required for GitHub Models API (zero-config LLM fallback)
 
 jobs:
   appsec-triage:

@@ -11,6 +11,7 @@ permissions:
   pull-requests: write
   issues: write
   id-token: write   # Required for GitHub OIDC — lets CI auth to ingest without secrets
+  models: read      # Required for GitHub Models API (zero-config LLM fallback)
 
 jobs:
   # ── Job 1: unit tests + lint ──────────────────────────────────────────────
