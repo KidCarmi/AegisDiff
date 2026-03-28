@@ -73,9 +73,6 @@ jobs:
       - name: Run AegisDiff triage
         if: steps.diff.outputs.skip == 'false'
         env:
-          CEREBRAS_API_KEY:     ${{ secrets.CEREBRAS_API_KEY }}
-          CEREBRAS_API_KEY_2:   ${{ secrets.CEREBRAS_API_KEY_2 }}
-          CEREBRAS_API_KEY_3:   ${{ secrets.CEREBRAS_API_KEY_3 }}
           OPENROUTER_API_KEY:   ${{ secrets.OPENROUTER_API_KEY }}
           OPENROUTER_API_KEY_2: ${{ secrets.OPENROUTER_API_KEY_2 }}
           OPENROUTER_API_KEY_3: ${{ secrets.OPENROUTER_API_KEY_3 }}

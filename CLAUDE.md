@@ -16,17 +16,28 @@ This is a hard requirement. Every architectural decision must preserve this.
 ## Repository Structure
 
 ```
-aegisdiff/       Python triage engine (runs in user's GitHub Actions)
-web/             Next.js 14 App Router dashboard (operator hosts on Vercel)
-landing/         Static landing page (Cloudflare Pages)
-tests/           Pytest unit tests + 10 security diff fixtures
-scripts/         local_scan.py for manual testing
+aegisdiff/              Python triage engine
+  github/               GitHub API clients (client.py + app_client.py)
+  llm/providers/        openrouter.py, github_models.py, cerebras.py (unused)
+  triage/               engine.py, verdicts.py, prompts.py, sarif.py
+  code_context/         extractor.py (AST sink/source), models.py
+  cache/                gist_cache.py (optional ephemeral cache)
+web/                    Next.js 14 App Router dashboard (Vercel)
+  app/api/              32 API route handlers
+  lib/                  db.ts, rbac.ts, github-app.ts, auth.ts, types.ts
+  middleware.ts          Route protection (session + admin guard)
+  instrumentation.ts     Sentry init + DB migrations on cold start
+landing/                Static landing page (Cloudflare Pages)
+tests/                  12 test files, ~231 tests, 10 security fixtures
+scripts/                local_scan.py for manual testing
 .github/
   workflows/
-    aegisdiff.yml      Triage workflow (users copy this to their repos)
-    ci.yml             Canary + self-scan + lint/test (this repo's CI)
-    security.yml       SAST/SCA pipeline (Semgrep, Bandit, Trivy, Gitleaks)
-    cleanup.yml        Daily DB retention cleanup
+    aegisdiff.yml        User-facing triage workflow (manual setup path)
+    aegisdiff-app.yml    GitHub App path (repository_dispatch from webhook)
+    analyze_pr.yml       Legacy PAT-based dispatch (superseded by aegisdiff-app.yml)
+    ci.yml               Canary + self-scan + lint/test (this repo's CI)
+    security.yml         SAST/SCA pipeline (Semgrep, Bandit, Trivy, Gitleaks)
+    cleanup.yml          Daily DB retention cleanup (cron)
 ```
 
 ## Key Design Rules — DO NOT VIOLATE
@@ -80,11 +91,14 @@ User keys (OPENROUTER_API_KEY 1/2/3):
 
 Platform keys (via OIDC → /api/llm-token, 100 scans/day):
   7. OpenRouter llama-3.3-70b-instruct:free  (platform key 1)
-  8. OpenRouter llama-3.3-70b-instruct:free  (platform key 2/3)
-  9. OpenRouter gemma-3-9b-it:free     (platform keys)
+  8. OpenRouter llama-3.3-70b-instruct:free  (platform key 2)
+  9. OpenRouter llama-3.3-70b-instruct:free  (platform key 3)
+  10. OpenRouter gemma-3-9b-it:free           (platform key 1)
+  11. OpenRouter gemma-3-9b-it:free           (platform key 2)
+  12. OpenRouter gemma-3-9b-it:free           (platform key 3)
 
 Zero-config fallback (always present in Actions):
-  10. GitHub Models Llama-3.3-70B-Instruct  (GITHUB_TOKEN)
+  13. GitHub Models Llama-3.3-70B-Instruct  (GITHUB_TOKEN)
 ```
 
 Rate limits: OpenRouter free tier = 8 req/min per key per model.
@@ -102,7 +116,7 @@ Roles are resolved from the GitHub API on every session, not stored in DB.
 | `repo:developer` | GitHub repo write permission | View scans, feedback, rescan |
 | `repo:viewer` | GitHub repo read permission | View scans (read-only) |
 
-**Resolution function** (implement in `web/lib/rbac.ts`):
+**Resolution function** (implemented in `web/lib/rbac.ts`):
 ```typescript
 type Role = "platform:admin" | "org:owner" | "repo:admin" | "repo:developer" | "repo:viewer" | null;
 
@@ -204,30 +218,50 @@ npm run build                   # Production build
 
 ```
 # Public (OIDC auth from GitHub Actions)
-GET  /api/llm-token           Platform AI key distribution
-POST /api/ingest              Scan metadata ingestion
+GET  /api/llm-token                     Platform AI key distribution (100/day)
+POST /api/ingest                        Scan metadata ingestion (array or single)
+
+# Webhooks
+POST /api/webhooks/github               GitHub App webhook (HMAC-SHA256 verified)
 
 # User-facing (NextAuth session, RBAC enforced)
-GET  /api/repos               List repos (viewer+)
-GET  /api/scans               Scan history (viewer+)
-GET  /api/scans/export        CSV or SARIF export (viewer+)
-POST /api/scans/[id]/feedback Wrong verdict correction (developer+)
-GET|PATCH /api/repos/[o]/[n]/slack     Slack webhook (admin)
-GET|PATCH /api/repos/[o]/[n]/discord   Discord webhook (admin)
-GET|PATCH /api/repos/[o]/[n]/teams     MS Teams webhook (admin)
-GET|PATCH /api/repos/[o]/[n]/notify    Notification thresholds (admin)
-GET|POST|DELETE /api/repos/[o]/[n]/ignore  Ignore rules (admin)
-GET  /api/audit               Audit log (admin+)
+GET  /api/repos                         List repos (viewer+)
+POST /api/repos                         Connect new repo (admin)
+POST /api/repos/sync                    Re-sync repos from GitHub App (admin)
+GET  /api/scans                         Scan history filtered to user's repos (viewer+)
+GET  /api/scans/export                  Export as CSV/JSON (viewer+)
+GET  /api/scans/top-vulns               Top vulnerability trends (viewer+)
+GET  /api/scans/sla-breaches            CRITICAL/HIGH open > N days (viewer+)
+POST /api/scans/[id]/feedback           Verdict correction (developer+)
+POST /api/scans/[id]/rescan             Trigger manual rescan (developer+)
+GET  /api/repos/[o]/[n]/token           Rotate ingest token (admin)
+GET  /api/repos/[o]/[n]/usage           Daily scan count (viewer+)
+GET  /api/repos/[o]/[n]/setup-workflow  Generate workflow YAML (admin)
+GET|PATCH /api/repos/[o]/[n]/slack      Slack webhook (admin)
+GET|PATCH /api/repos/[o]/[n]/discord    Discord webhook (admin)
+GET|PATCH /api/repos/[o]/[n]/teams      MS Teams webhook (admin)
+GET|PATCH /api/repos/[o]/[n]/notify     Notification severity threshold (admin)
+GET|POST|DELETE /api/repos/[o]/[n]/ignore  Ignore rules by CWE/title (admin)
+GET  /api/audit                         Audit log (admin+)
+GET|PATCH /api/settings                 User settings (scan retention days)
+DELETE /api/user/delete                 Account deletion
+
+# Badges
+GET  /api/badge/[o]/[n]                 SVG security status badge (public)
 
 # Platform admin (platform:admin only)
-GET  /api/admin/stats         Platform-wide usage stats
-POST /api/admin/migrate       Manual DB migration
-POST /api/admin/rate-limit    Override rate limit for a repo/org
-GET  /api/admin/users         User list + role view
+GET  /api/admin/stats                   Platform-wide usage stats
+POST /api/admin/migrate                 Manual DB migration trigger
+POST /api/admin/rate-limit              Override daily scan limit per repo/org
+GET  /api/admin/users                   User list + role view
+POST /api/admin/cleanup                 Manual 90-day retention cleanup (Bearer token)
 
-# External
-GET  /api/v1/scans            Public REST API (Bearer ak_ key)
-GET|POST|DELETE /api/v1/key   Manage public API key
+# Cron (Vercel, protected by CRON_SECRET)
+POST /api/cron/weekly-digest            Monday 09:00 UTC digest to all webhooks
+
+# External (Bearer ak_ key)
+GET  /api/v1/scans                      Public scan history
+GET|POST|DELETE /api/v1/key             Manage API key
 ```
 
 ## DB Schema

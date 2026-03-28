@@ -20,13 +20,17 @@ GitHub App webhook → Vercel (verify + dispatch, <1s)
     ▼
 repository_dispatch → AegisDiff Engine (GitHub Actions on our repo)
     │
-    ├── Fetch diff via GitHub App token
+    ├── Fetch diff via GitHub App installation token
     ├── AST parse → sink/source/data-flow extraction
     │   (Python, JS, TS, Go, Java, Ruby, PHP)
-    ├── Gemini 1.5 Pro (primary) ──[fail]──▶ Groq Llama-3 (fallback)
+    ├── OpenRouter llama-3.3-70b:free (primary)
+    │   └── 429 → rotate to next key/model
+    ├── OpenRouter gemma-3-9b-it:free (secondary fallback)
+    ├── GitHub Models Llama-3.3-70B (zero-config last resort, GITHUB_TOKEN)
     │
     ├── Inline PR review comment on the exact vulnerable line
     ├── Top-level PR summary comment
+    ├── SARIF upload → GitHub Code Scanning (Security tab)
     └── Scan metadata sent to dashboard (no code, no diffs — metadata only)
 ```
 
@@ -43,7 +47,7 @@ repository_dispatch → AegisDiff Engine (GitHub Actions on our repo)
 
 ## Quick Start — 4 clicks
 
-1. Go to [app.aegisdiff.io](https://app.aegisdiff.io) → **Sign in with GitHub**
+1. Go to [aegis-diff.vercel.app](https://aegis-diff.vercel.app) → **Sign in with GitHub**
 2. Click **Install AegisDiff on GitHub** → select repos → click **Install**
 3. Open any pull request in a connected repo
 4. Security verdict appears in the PR in ~90 seconds
@@ -51,7 +55,8 @@ repository_dispatch → AegisDiff Engine (GitHub Actions on our repo)
 **That's it. Zero configuration. Zero secrets. Zero YAML.**
 
 > **Legacy / Self-Hosted:** You can also manually add `.github/workflows/aegisdiff.yml`
-> to your repo and supply your own `GEMINI_API_KEY`. The GitHub App path is recommended.
+> to your repo. Supply `OPENROUTER_API_KEY` for unlimited scans, or omit it to
+> use the platform's 100 scans/day free tier.
 
 ---
 
@@ -61,7 +66,7 @@ repository_dispatch → AegisDiff Engine (GitHub Actions on our repo)
 |---|---|
 | Scans | 100 per repo per day (platform AI keys) |
 | Repos | Unlimited |
-| Scan history | 30 days |
+| Scan history | 30 days (configurable) |
 | Webhooks | Slack, Discord, MS Teams |
 | Dashboard users | Unlimited (RBAC-controlled) |
 | Bring your own AI keys | Unlimited scans, bypasses rate limits |
@@ -72,9 +77,10 @@ repository_dispatch → AegisDiff Engine (GitHub Actions on our repo)
 
 | Layer | Service | Cost |
 |---|---|---|
-| Compute | GitHub Actions (AegisDiff's own repo, public = unlimited) | $0 |
-| Primary AI | Google Gemini 1.5 Pro | Free tier: 1,500 req/day |
-| Fallback AI | Groq Llama-3.3-70b (4-key pool) | Free tier: ~57,600 req/day |
+| Compute | GitHub Actions (AegisDiff's own repo, public = unlimited minutes) | $0 |
+| Primary AI | OpenRouter llama-3.3-70b-instruct:free | Free |
+| Secondary AI | OpenRouter gemma-3-9b-it:free (per-key fallback) | Free |
+| Last-resort AI | GitHub Models Llama-3.3-70B (GITHUB_TOKEN, always present) | Free |
 | Webhook handler | Vercel (Next.js 14) | Free tier: unlimited |
 | Database | Neon PostgreSQL (serverless) | Free tier: 0.5 GB |
 | Auth | NextAuth.js + GitHub OAuth + GitHub App | Free |
@@ -86,7 +92,7 @@ repository_dispatch → AegisDiff Engine (GitHub Actions on our repo)
 
 - The GitHub App fetches your PR diff using a scoped installation token
 - LLM calls are made from **AegisDiff's GitHub Actions runner** — your code
-  goes directly from GitHub → Gemini/Groq with no intermediate storage
+  goes directly from GitHub → OpenRouter/GitHub Models with no intermediate storage
 - Only scan **metadata** reaches the dashboard: verdict, severity, CWE,
   confidence, title, timing
 - **No code, no diffs, no evidence strings** are stored in any database
@@ -118,20 +124,45 @@ TRUE_POSITIVE findings are posted as inline review comments pinned to the exact
 vulnerable line, not just a top-level comment. The top-level comment becomes
 a summary (verdict + severity + CWE).
 
-### Multi-Language AST Analysis
-Sink/source detection across Python, JavaScript, TypeScript, Go, Java, Ruby,
-and PHP. Each language has tailored dangerous-call patterns and sanitizer checks.
+### Per-File Chunked Analysis
+Diffs over 100 lines are split by file and analyzed independently. Each file gets
+its own LLM call. Results are aggregated — highest severity becomes the PR verdict.
+Multiple inline comments are posted (one per vulnerable file).
+
+### SARIF / GitHub Code Scanning
+Findings are uploaded to GitHub Code Scanning after every scan. They appear in
+the repo's Security tab alongside Dependabot and CodeQL alerts.
+
+### `aegisdiff-ignore` Suppression
+```python
+# aegisdiff-ignore: CWE-89 reason: test-only
+result = cursor.execute(raw_sql)  # suppressed
+```
+Paste on or above a sink line. Suppressed sinks skip the LLM call entirely.
 
 ### AI Failover & Context Trimming
 
 ```
-1. Google Gemini 1.5 Pro  (primary — 1M token context)
-   └── 429 / 5xx → exponential backoff (2s, 4s, 8s) then rotate
+Provider priority (per scan):
 
-2. Groq Llama-3.3-70b  (fallback — 5,500 token effective budget)
-   └── 413 Payload Too Large → halve context scale (1.0→0.5→0.25→0.125) + retry
+User keys (OPENROUTER_API_KEY 1/2/3):
+  1. OpenRouter llama-3.3-70b-instruct:free  (key 1)
+  2. OpenRouter llama-3.3-70b-instruct:free  (key 2)
+  3. OpenRouter llama-3.3-70b-instruct:free  (key 3)
+  4. OpenRouter gemma-3-9b-it:free           (key 1)
+  5. OpenRouter gemma-3-9b-it:free           (key 2)
+  6. OpenRouter gemma-3-9b-it:free           (key 3)
 
-Both exhausted → Verdict.error(reason) — reason visible in dashboard title
+Platform keys (via OIDC → /api/llm-token, 100 scans/day free):
+  7-9.  OpenRouter llama-3.3-70b-instruct:free  (platform keys)
+  10-12. OpenRouter gemma-3-9b-it:free          (platform keys)
+
+Zero-config last resort (always present in Actions):
+  13. GitHub Models Llama-3.3-70B-Instruct  (GITHUB_TOKEN)
+
+429 → immediate rotation (no sleep)
+413 → halve context scale (1.0→0.5→0.25→0.125) + retry same provider
+All exhausted → sleep 30s → retry full list once → Verdict.error(reason)
 ```
 
 ---
@@ -175,7 +206,7 @@ The AI follows a strict 5-step analysis protocol — **disprove before confirmin
 ```bash
 # Python engine
 pip install -e .[dev]
-pytest                              # 105 tests, ~0.5s
+pytest                              # ~231 tests, ~2.5s
 ruff check aegisdiff/               # Lint (CI gate)
 ruff format aegisdiff/              # Format
 
@@ -195,41 +226,41 @@ npm run build                       # Production build check
 ### ✅ Phase 0 — Platform Key Distribution
 Users need zero secrets. Runners exchange OIDC tokens for platform AI keys
 at `/api/llm-token`. Rate-limited at 100 scans/day per repo on the free tier.
-4-key Groq pool (~57,600 req/day capacity). User-provided keys always win.
+User-provided `OPENROUTER_API_KEY` always wins and bypasses limits.
 
 ### ✅ Phase 1 — RBAC + Admin Panel
 Role-based access derived from GitHub org/repo permissions. Org owners see
 all repos. Admins configure. Platform admin panel with Overview / Users /
-Rate Limits tabs. Admin link in navbar (platform:admin only).
+Rate Limits / Failures tabs. Admin link in navbar (platform:admin only).
 
 ### ✅ Phase 2 — Inline PR Review Comments
 Findings pinned to the exact vulnerable line, not just a top-level PR comment.
 Summary comment shows verdict + severity + CWE. Both entrypoints (manual workflow
 and GitHub App) post inline review comments.
 
-### Phase 3 — Per-File Chunked Analysis
+### ✅ Phase 3 — Per-File Chunked Analysis
 One verdict per changed file. Eliminates the "one verdict for 20 files" problem.
 Aggregated by severity: worst finding becomes the PR verdict.
 
-### Phase 4 — `aegisdiff-ignore` Inline Suppression
+### ✅ Phase 4 — `aegisdiff-ignore` Inline Suppression
 `# aegisdiff-ignore: CWE-89 reason: test-only` — standard SAST workflow.
-Suppressed sinks skip the LLM call entirely.
+Suppressed sinks skip the LLM call entirely. Suppressions persisted to dashboard.
 
-### Phase 5 — Feedback Loop
-👍 / 👎 buttons in dashboard. FALSE_POSITIVE feedback auto-adds to ignore rules.
-All corrections in audit log.
+### ✅ Phase 5 — Feedback Loop
+"Mark FP / Mark TP" buttons in dashboard (developer+ role). FALSE_POSITIVE feedback
+auto-adds to ignore rules. All corrections logged in audit trail.
 
-### Phase 6 — Re-scan on Demand
+### ✅ Phase 6 — Re-scan on Demand
 `@aegisdiff rescan` in a PR comment triggers a fresh analysis without a commit.
-Rate-limited: max 3 rescans/PR/hour.
+Rate-limited: max 3 rescans/PR/hour. Dashboard "Re-scan" button also available.
 
-### Phase 7 — SARIF Export + GitHub Code Scanning Integration
-Export findings as SARIF. Integrate with GitHub's native Security tab so
-findings appear alongside Dependabot and CodeQL alerts.
+### ✅ Phase 7 — SARIF / GitHub Code Scanning
+TRUE_POSITIVE findings uploaded to GitHub Code Scanning API after every scan.
+Appear in the repo's Security tab alongside Dependabot and CodeQL alerts.
 
-### Phase 8 — Trend Analytics & SLA Tracking
+### ✅ Phase 8 — Trend Analytics & SLA Tracking
 Per-repo vulnerability velocity charts. Mean-time-to-fix tracking.
-Weekly digest emails. SLA breach alerts (e.g. HIGH unresolved > 7 days).
+Weekly digest (Monday 09:00 UTC). SLA breach alerts (CRITICAL/HIGH unresolved > N days).
 
 ---
 
