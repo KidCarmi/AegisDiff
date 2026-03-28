@@ -213,6 +213,11 @@ def main() -> None:
         for i, key in enumerate(platform_openrouter, start=1):
             providers.append(OpenRouterProvider(key, model="google/gemma-3-27b-it:free"))
             logger.info("Provider: OpenRouter gemma-3-27b:free (platform %d/%d)", i, n_por)
+        platform_groq = [k for k in platform.get("groq_keys", []) if k]
+        n_pg = len(platform_groq)
+        for i, key in enumerate(platform_groq, start=1):
+            providers.append(GroqProvider(key))
+            logger.info("Provider: Groq llama-3.3-70b-versatile (platform %d/%d)", i, n_pg)
 
     # ── Groq — fast free-tier LLM, no training on requests ───────────────
     for i, key in enumerate(groq_keys, start=1):

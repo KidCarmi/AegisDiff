@@ -102,7 +102,13 @@ export async function GET(req: NextRequest) {
     process.env.PLATFORM_OPENROUTER_API_KEY_3,
   ].filter(Boolean) as string[];
 
-  if (openrouterKeys.length === 0) {
+  const groqKeys = [
+    process.env.PLATFORM_GROQ_API_KEY,
+    process.env.PLATFORM_GROQ_API_KEY_2,
+    process.env.PLATFORM_GROQ_API_KEY_3,
+  ].filter(Boolean) as string[];
+
+  if (openrouterKeys.length === 0 && groqKeys.length === 0) {
     return NextResponse.json(
       { error: "Platform AI keys not configured — contact support." },
       { status: 503 }
@@ -126,6 +132,7 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     openrouter_keys: openrouterKeys,
+    groq_keys:       groqKeys,
     expires_at:      expiresAt,
     scans_today:     countBefore + 1,
     limit:           effectiveLimit,
