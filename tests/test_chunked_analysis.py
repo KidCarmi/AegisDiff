@@ -16,7 +16,7 @@ import pytest
 
 from aegisdiff.llm.orchestrator import LLMOrchestrator
 from aegisdiff.llm.providers.base import LLMResponse
-from aegisdiff.triage.engine import TriageEngine
+from aegisdiff.triage.engine import TriageEngine, _MAX_CHUNKS_PER_PR, _MAX_HUNK_LINES
 from aegisdiff.triage.verdicts import Severity, Verdict, VerdictType, parse_verdict
 
 
@@ -359,3 +359,113 @@ class TestAnalyzeDiffChunked:
         verdicts = engine.analyze_diff_chunked(plain_diff)
         # Falls back to single whole-diff analysis
         assert len(verdicts) == 1
+
+
+# ── _split_file_diff_into_hunks ───────────────────────────────────────────────
+
+def _make_file_diff(n_hunks: int, lines_per_hunk: int = 10) -> str:
+    """Build a synthetic single-file diff with n_hunks @@ sections."""
+    header = (
+        "diff --git a/app/views.py b/app/views.py\n"
+        "index abc..def 100644\n"
+        "--- a/app/views.py\n"
+        "+++ b/app/views.py\n"
+    )
+    hunks = ""
+    for i in range(n_hunks):
+        start = i * lines_per_hunk + 1
+        hunks += f"@@ -{start},{lines_per_hunk} +{start},{lines_per_hunk + 1} @@\n"
+        for j in range(lines_per_hunk - 1):
+            hunks += f" context line {i}-{j}\n"
+        hunks += f"+new line in hunk {i}\n"
+    return header + hunks
+
+
+class TestSplitFileHunks:
+
+    def test_small_diff_stays_single_chunk(self):
+        diff = _make_file_diff(n_hunks=2, lines_per_hunk=10)
+        result = TriageEngine._split_file_diff_into_hunks(diff, max_hunk_lines=150)
+        assert len(result) == 1
+
+    def test_large_diff_splits_into_multiple_chunks(self):
+        # 3 hunks × 60 lines = 180 lines total → should split with max=100
+        diff = _make_file_diff(n_hunks=3, lines_per_hunk=60)
+        result = TriageEngine._split_file_diff_into_hunks(diff, max_hunk_lines=100)
+        assert len(result) >= 2
+
+    def test_each_chunk_contains_file_header(self):
+        diff = _make_file_diff(n_hunks=4, lines_per_hunk=60)
+        result = TriageEngine._split_file_diff_into_hunks(diff, max_hunk_lines=100)
+        for chunk in result:
+            assert "diff --git" in chunk
+            assert "--- a/app/views.py" in chunk
+            assert "+++ b/app/views.py" in chunk
+
+    def test_each_chunk_contains_at_least_one_hunk(self):
+        diff = _make_file_diff(n_hunks=5, lines_per_hunk=60)
+        result = TriageEngine._split_file_diff_into_hunks(diff, max_hunk_lines=100)
+        for chunk in result:
+            assert "@@" in chunk
+
+    def test_all_hunks_preserved_across_chunks(self):
+        n_hunks = 6
+        diff = _make_file_diff(n_hunks=n_hunks, lines_per_hunk=60)
+        result = TriageEngine._split_file_diff_into_hunks(diff, max_hunk_lines=100)
+        combined = "".join(result)
+        # Every hunk marker should appear (once in each chunk it's in)
+        # At minimum every "new line in hunk N" should appear somewhere
+        for i in range(n_hunks):
+            assert f"new line in hunk {i}" in combined
+
+    def test_no_hunk_markers_returns_original(self):
+        diff = "diff --git a/x.py b/x.py\nindex abc..def 100644\nbinary files differ\n"
+        result = TriageEngine._split_file_diff_into_hunks(diff, max_hunk_lines=50)
+        assert result == [diff]
+
+    def test_single_oversized_hunk_not_split(self):
+        # A single hunk > max still comes out as one chunk (can't split mid-hunk)
+        diff = _make_file_diff(n_hunks=1, lines_per_hunk=200)
+        result = TriageEngine._split_file_diff_into_hunks(diff, max_hunk_lines=50)
+        assert len(result) == 1
+
+    def test_chunk_line_counts_respect_limit(self):
+        diff = _make_file_diff(n_hunks=10, lines_per_hunk=20)
+        max_lines = 50
+        result = TriageEngine._split_file_diff_into_hunks(diff, max_hunk_lines=max_lines)
+        header_lines = 4  # diff --git + index + --- + +++
+        for chunk in result:
+            hunk_lines = chunk.count("\n") - header_lines
+            # Each chunk's hunk content must be ≤ max_lines
+            # (a single hunk that exceeds the limit is allowed through as-is)
+            assert hunk_lines <= max_lines or chunk.count("@@") == 1
+
+
+# ── quota cap ────────────────────────────────────────────────────────────────
+
+class TestChunkCap:
+
+    def _many_file_diff(self, n_files: int) -> str:
+        """Build a diff with n_files, each having 2 hunks of 80 lines."""
+        diff = ""
+        for i in range(n_files):
+            diff += f"diff --git a/file{i}.py b/file{i}.py\n"
+            diff += f"index {i:07x}..{i+1:07x} 100644\n"
+            diff += f"--- a/file{i}.py\n+++ b/file{i}.py\n"
+            for h in range(2):
+                start = h * 80 + 1
+                diff += f"@@ -{start},80 +{start},81 @@\n"
+                for j in range(79):
+                    diff += f" line {j}\n"
+                diff += f"+injected line hunk {h}\n"
+        return diff
+
+    def test_chunks_capped_at_max(self, tmp_path):
+        # 15 files × 2 hunks each = 30 sub-chunks → should be capped at _MAX_CHUNKS_PER_PR
+        diff = self._many_file_diff(n_files=15)
+        responses = [_fp()] * _MAX_CHUNKS_PER_PR
+        orch = _orch_sequence(*responses)
+        engine = TriageEngine(orch, tmp_path)
+        verdicts = engine.analyze_diff_chunked(diff)
+        assert len(verdicts) == _MAX_CHUNKS_PER_PR
+        assert orch.complete.call_count == _MAX_CHUNKS_PER_PR

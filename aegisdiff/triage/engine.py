@@ -16,6 +16,16 @@ from .verdicts import Severity, Verdict, VerdictType, parse_verdict
 
 logger = logging.getLogger(__name__)
 
+# Max changed lines per sub-chunk sent to the LLM.
+# Keeps each request well within provider context limits while
+# still covering a meaningful amount of code per analysis call.
+_MAX_HUNK_LINES = 150
+
+# Hard cap on total LLM calls per PR to protect daily quota.
+# With 3 Groq keys at ~14,400 RPD each, 20 chunks/PR supports
+# ~2,100 large-PR scans per day before quota pressure.
+_MAX_CHUNKS_PER_PR = 20
+
 # Files matching these patterns carry no production security risk and are
 # skipped from LLM analysis to avoid wasting quota + context budget.
 _TEST_FILE_PATTERNS = re.compile(
@@ -157,39 +167,63 @@ class TriageEngine:
 
     def analyze_diff_chunked(self, raw_diff: str) -> List[Verdict]:
         """
-        Analyze each changed file independently and return one Verdict per file.
+        Analyze a diff at hunk level and return one Verdict per sub-chunk.
 
-        Use this for large diffs (>100 lines) to avoid context-window pressure
-        and to get per-file findings with accurate line numbers.
+        Pipeline:
+          1. Split diff into per-file chunks (_split_diff_by_file).
+          2. For each file, further split into sub-hunks of ≤ _MAX_HUNK_LINES
+             lines (_split_file_diff_into_hunks). This ensures lines 201+ of
+             a large changed file are never silently missed.
+          3. Skip test files (no prod security risk).
+          4. Cap total sub-chunks at _MAX_CHUNKS_PER_PR to protect daily quota.
+          5. Analyze each sub-chunk independently.
 
         Returns a non-empty list — at minimum [Verdict.no_op()] for empty diffs.
         The caller should use aggregate_verdicts() to select the primary result.
         """
-        chunks = self._split_diff_by_file(raw_diff)
-        if not chunks:
+        file_chunks = self._split_diff_by_file(raw_diff)
+        if not file_chunks:
             logger.info("No per-file chunks found — falling back to whole-diff analysis")
             return [self.analyze_diff(raw_diff)]
 
-        verdicts: List[Verdict] = []
-        for file_path, chunk in chunks:
+        # Expand each file diff into ≤ _MAX_HUNK_LINES sub-chunks
+        expanded: List[Tuple[str, str]] = []
+        for file_path, file_diff in file_chunks:
             if _is_test_file(file_path):
+                # Preserve the entry so the count stays consistent, but mark
+                # it so the analysis loop below can skip the LLM call.
+                expanded.append((file_path, ""))
+                continue
+            sub_hunks = self._split_file_diff_into_hunks(file_diff, _MAX_HUNK_LINES)
+            for sub in sub_hunks:
+                expanded.append((file_path, sub))
+
+        # Quota guard — cap before any LLM calls
+        if len(expanded) > _MAX_CHUNKS_PER_PR:
+            logger.warning(
+                "PR produces %d sub-chunks — capping at %d to protect daily quota",
+                len(expanded),
+                _MAX_CHUNKS_PER_PR,
+            )
+            expanded = expanded[:_MAX_CHUNKS_PER_PR]
+
+        verdicts: List[Verdict] = []
+        for file_path, chunk in expanded:
+            if not chunk:
                 logger.info("Skipping test file: %s", file_path)
                 verdicts.append(Verdict.no_op())
                 continue
-            logger.info("Analyzing chunk: %s (%d lines)", file_path, chunk.count("\n"))
+            logger.info("Analyzing sub-chunk: %s (%d lines)", file_path, chunk.count("\n"))
             verdict = self.analyze_diff(chunk)
             verdicts.append(verdict)
 
-        # Drop no-op FALSE_POSITIVEs when more actionable findings exist
         actionable = [v for v in verdicts if v.verdict != VerdictType.FALSE_POSITIVE]
-        if actionable:
-            logger.info(
-                "Chunked analysis: %d file(s), %d actionable finding(s)",
-                len(chunks),
-                len(actionable),
-            )
-            return verdicts  # Return all so caller can decide what to ingest
-
+        logger.info(
+            "Chunked analysis: %d sub-chunk(s) across %d file(s), %d actionable",
+            len(expanded),
+            len(file_chunks),
+            len(actionable),
+        )
         return verdicts
 
     @staticmethod
@@ -239,3 +273,57 @@ class TriageEngine:
             chunks.append((current_file, "".join(current_lines)))
 
         return chunks
+
+    @staticmethod
+    def _split_file_diff_into_hunks(file_diff: str, max_hunk_lines: int = 150) -> List[str]:
+        """
+        Split a single-file diff into sub-chunks of at most max_hunk_lines lines.
+
+        Each returned string is a self-contained diff fragment: the file header
+        (diff --git / index / --- / +++ lines) followed by one or more @@ hunks,
+        with the total line count kept under max_hunk_lines.
+
+        This ensures that vulnerabilities deep in a large changed file (e.g. line
+        350 of a 500-line change) are not silently missed due to context trimming.
+        """
+        header_lines: List[str] = []
+        hunks: List[List[str]] = []
+        current_hunk: List[str] = []
+        in_header = True
+
+        for line in file_diff.splitlines(keepends=True):
+            if line.startswith("@@"):
+                in_header = False
+                if current_hunk:
+                    hunks.append(current_hunk)
+                current_hunk = [line]
+            elif in_header:
+                header_lines.append(line)
+            else:
+                current_hunk.append(line)
+
+        if current_hunk:
+            hunks.append(current_hunk)
+
+        if not hunks:
+            # No @@ markers — return as-is (binary diff, rename-only, etc.)
+            return [file_diff]
+
+        header = "".join(header_lines)
+        sub_chunks: List[str] = []
+        current_lines: List[str] = []
+        current_count = 0
+
+        for hunk in hunks:
+            hunk_size = len(hunk)
+            if current_lines and current_count + hunk_size > max_hunk_lines:
+                sub_chunks.append(header + "".join(current_lines))
+                current_lines = []
+                current_count = 0
+            current_lines.extend(hunk)
+            current_count += hunk_size
+
+        if current_lines:
+            sub_chunks.append(header + "".join(current_lines))
+
+        return sub_chunks
