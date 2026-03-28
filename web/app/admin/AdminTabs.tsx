@@ -590,6 +590,7 @@ function RateLimitsTab({ rateLimited }: { rateLimited: RateLimitedRepo[] }) {
 
 const PROVIDER_COLORS: Record<string, string> = {
   openrouter:    "bg-blue-500",
+  groq:          "bg-orange-500",
   github_models: "bg-purple-500",
   cerebras:      "bg-green-500",
   unknown:       "bg-gray-400",
