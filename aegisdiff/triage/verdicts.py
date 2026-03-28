@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import re
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
@@ -129,6 +130,12 @@ def parse_verdict(llm_output: str, provider: str = "unknown") -> Verdict:
         if inner_lines and inner_lines[-1].strip() == "```":
             inner_lines = inner_lines[:-1]
         text = "\n".join(inner_lines).strip()
+
+    # Fix invalid JSON escape sequences the LLM may emit when quoting code
+    # snippets (e.g. \1, \s, \d from regex strings). Replace bare backslashes
+    # that are NOT followed by a valid JSON escape character with \\.
+    _VALID_JSON_ESCAPES = re.compile(r'\\(?!["\\/bfnrtu])')
+    text = _VALID_JSON_ESCAPES.sub(r"\\\\", text)
 
     try:
         data = json.loads(text)
