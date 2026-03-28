@@ -807,9 +807,16 @@ class CodeContextExtractor:
         if lang == "ruby":
             return (RUBY_SINK_PATTERNS, RUBY_SOURCE_PATTERNS, SAFE_RUBY_PATTERNS, [])
         if lang == "php":
-            return (PHP_SINK_PATTERNS, PHP_SOURCE_PATTERNS, SAFE_PHP_PATTERNS, PHP_SANITIZER_KEYWORDS)
+            return (
+                PHP_SINK_PATTERNS, PHP_SOURCE_PATTERNS, SAFE_PHP_PATTERNS, PHP_SANITIZER_KEYWORDS
+            )
         if lang == "csharp":
-            return (CSHARP_SINK_PATTERNS, CSHARP_SOURCE_PATTERNS, SAFE_CSHARP_PATTERNS, CSHARP_SANITIZER_KEYWORDS)
+            return (
+                CSHARP_SINK_PATTERNS,
+                CSHARP_SOURCE_PATTERNS,
+                SAFE_CSHARP_PATTERNS,
+                CSHARP_SANITIZER_KEYWORDS,
+            )
         # Default: Python
         return (PYTHON_SINK_PATTERNS, PYTHON_SOURCE_PATTERNS, SAFE_ORM_PATTERNS, [])
 
