@@ -133,7 +133,15 @@ def main() -> None:
         ]
         if k
     ]
-    groq_keys = [k for k in [os.environ.get("GROQ_API_KEY", "")] if k]
+    groq_keys = [
+        k
+        for k in [
+            os.environ.get("GROQ_API_KEY", ""),
+            os.environ.get("GROQ_API_KEY_2", ""),
+            os.environ.get("GROQ_API_KEY_3", ""),
+        ]
+        if k
+    ]
     ingest_url = os.environ.get("AEGISDIFF_INGEST_URL", "")
     ingest_token = os.environ.get("AEGISDIFF_INGEST_TOKEN", "")
 

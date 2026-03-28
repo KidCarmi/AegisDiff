@@ -182,7 +182,7 @@ def main() -> None:
     openrouter_keys = [
         k for k in [cfg.openrouter_api_key, cfg.openrouter_api_key_2, cfg.openrouter_api_key_3] if k
     ]
-    groq_keys = [k for k in [cfg.groq_api_key] if k]
+    groq_keys = [k for k in [cfg.groq_api_key, cfg.groq_api_key_2, cfg.groq_api_key_3] if k]
 
     # ── Build provider list ────────────────────────────────────────────────
     # Priority: OpenRouter llama-3.3-70b:free → OpenRouter gemma-3-27b:free
