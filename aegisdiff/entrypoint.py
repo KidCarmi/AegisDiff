@@ -170,6 +170,7 @@ def main() -> None:
     )
     from .llm.orchestrator import LLMOrchestrator
     from .llm.providers.github_models import GitHubModelsProvider
+    from .llm.providers.groq import GroqProvider
     from .llm.providers.openrouter import OpenRouterProvider
     from .triage.engine import TriageEngine
     from .triage.verdicts import VerdictType
@@ -181,6 +182,7 @@ def main() -> None:
     openrouter_keys = [
         k for k in [cfg.openrouter_api_key, cfg.openrouter_api_key_2, cfg.openrouter_api_key_3] if k
     ]
+    groq_keys = [k for k in [cfg.groq_api_key] if k]
 
     # ── Build provider list ────────────────────────────────────────────────
     # Priority: OpenRouter llama-3.3-70b:free → OpenRouter gemma-3-27b:free
@@ -211,6 +213,11 @@ def main() -> None:
         for i, key in enumerate(platform_openrouter, start=1):
             providers.append(OpenRouterProvider(key, model="google/gemma-3-27b-it:free"))
             logger.info("Provider: OpenRouter gemma-3-27b:free (platform %d/%d)", i, n_por)
+
+    # ── Groq — fast free-tier LLM, no training on requests ───────────────
+    for i, key in enumerate(groq_keys, start=1):
+        providers.append(GroqProvider(key))
+        logger.info("Provider: Groq llama-3.3-70b-versatile (key %d/%d)", i, len(groq_keys))
 
     # ── GitHub Models — zero-config last-resort fallback ──────────────────
     # GITHUB_TOKEN is always injected into every Actions run — no extra secrets.

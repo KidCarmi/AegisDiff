@@ -104,6 +104,7 @@ def main() -> None:
     )
     from .llm.orchestrator import LLMOrchestrator
     from .llm.providers.github_models import GitHubModelsProvider
+    from .llm.providers.groq import GroqProvider
     from .llm.providers.openrouter import OpenRouterProvider
     from .triage.engine import TriageEngine
     from .triage.verdicts import VerdictType
@@ -132,6 +133,7 @@ def main() -> None:
         ]
         if k
     ]
+    groq_keys = [k for k in [os.environ.get("GROQ_API_KEY", "")] if k]
     ingest_url = os.environ.get("AEGISDIFF_INGEST_URL", "")
     ingest_token = os.environ.get("AEGISDIFF_INGEST_TOKEN", "")
 
@@ -186,6 +188,11 @@ def main() -> None:
     for i, key in enumerate(openrouter_keys, start=1):
         providers.append(OpenRouterProvider(key, model="google/gemma-3-27b-it:free"))
         logger.info("Provider: OpenRouter gemma-3-27b:free (key %d/%d)", i, n_or)
+
+    # ── Groq — fast free-tier LLM, no training on requests ───────────────────
+    for i, key in enumerate(groq_keys, start=1):
+        providers.append(GroqProvider(key))
+        logger.info("Provider: Groq llama-3.3-70b-versatile (key %d/%d)", i, len(groq_keys))
 
     # ── GitHub Models — zero-config last-resort fallback ─────────────────────
     # GITHUB_APP_PRIVATE_KEY signs JWTs — but the Actions GITHUB_TOKEN also works
