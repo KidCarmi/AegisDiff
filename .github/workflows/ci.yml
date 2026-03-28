@@ -79,6 +79,7 @@ jobs:
           OPENROUTER_API_KEY:   ${{ secrets.OPENROUTER_API_KEY }}
           OPENROUTER_API_KEY_2: ${{ secrets.OPENROUTER_API_KEY_2 }}
           OPENROUTER_API_KEY_3: ${{ secrets.OPENROUTER_API_KEY_3 }}
+          GROQ_API_KEY:         ${{ secrets.GROQ_API_KEY }}
           GITHUB_TOKEN:         ${{ github.token }}
           COMMIT_SHA:           ${{ github.sha }}
           REPO:                 ${{ github.repository }}
@@ -160,6 +161,7 @@ jobs:
           OPENROUTER_API_KEY:    ${{ secrets.OPENROUTER_API_KEY }}
           OPENROUTER_API_KEY_2:  ${{ secrets.OPENROUTER_API_KEY_2 }}
           OPENROUTER_API_KEY_3:  ${{ secrets.OPENROUTER_API_KEY_3 }}
+          GROQ_API_KEY:          ${{ secrets.GROQ_API_KEY }}
           GITHUB_TOKEN:          ${{ github.token }}
           PR_NUMBER:             ${{ github.event.pull_request.number || '' }}
           COMMIT_SHA:            ${{ github.sha }}
