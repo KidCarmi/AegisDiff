@@ -19,8 +19,10 @@ const LS_KEY = "aegisdiff_dashboard_ts";
 
 function ThemeToggle() {
   const [dark, setDark] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
     setDark(document.documentElement.classList.contains("dark"));
 
     function onStorage(e: StorageEvent) {
@@ -38,6 +40,12 @@ function ThemeToggle() {
     setDark(next);
     document.documentElement.classList.toggle("dark", next);
     localStorage.setItem("aegisdiff-theme", next ? "dark" : "light");
+  }
+
+  // Render a same-size placeholder until mounted to avoid hydration mismatch.
+  // Server always renders dark=false; client may differ based on localStorage.
+  if (!mounted) {
+    return <span className="ml-1 inline-block h-7 w-7" aria-hidden />;
   }
 
   return (
