@@ -22,14 +22,14 @@ export async function GET(req: NextRequest) {
 
   const rows = await sql`
     SELECT
-      COALESCE(s.cwe_id, 'Unknown')     AS cwe_id,
+      REGEXP_REPLACE(COALESCE(s.cwe_id, 'Unknown'), '^CWE-0+([0-9]+)', 'CWE-\1') AS cwe_id,
       s.severity,
-      s.title,
-      COUNT(*)                           AS total,
+      MODE() WITHIN GROUP (ORDER BY s.title)  AS title,
+      COUNT(*)                                 AS total,
       COUNT(*) FILTER (WHERE s.verdict = 'TRUE_POSITIVE')  AS true_positives,
       COUNT(*) FILTER (WHERE s.verdict = 'NEEDS_REVIEW')   AS needs_review,
       COUNT(*) FILTER (WHERE s.verdict = 'FALSE_POSITIVE') AS false_positives,
-      MAX(s.created_at)                  AS last_seen
+      MAX(s.created_at)                        AS last_seen
     FROM scans s
     JOIN repos r ON s.repo_id = r.id
     WHERE (
@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
     AND s.verdict IN ('TRUE_POSITIVE', 'NEEDS_REVIEW')
     AND s.cwe_id IS NOT NULL
     AND s.cwe_id != 'N/A'
-    GROUP BY s.cwe_id, s.severity, s.title
+    GROUP BY REGEXP_REPLACE(COALESCE(s.cwe_id, 'Unknown'), '^CWE-0+([0-9]+)', 'CWE-\1'), s.severity
     ORDER BY true_positives DESC, total DESC
     LIMIT 15
   `;

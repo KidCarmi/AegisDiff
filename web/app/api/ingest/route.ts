@@ -247,18 +247,20 @@ export async function POST(req: NextRequest) {
     const confidence = typeof payload.confidence === "number" && isFinite(payload.confidence)
       ? Math.max(0, Math.min(1, payload.confidence)) : null;
     const title = payload.title?.slice(0, 80) ?? null;
+    // Normalize CWE ID: strip leading zeros (CWE-078 → CWE-78)
+    const cweId = payload.cwe_id?.replace(/^CWE-0+(\d+)/, "CWE-$1") ?? null;
 
     await sql`
       INSERT INTO scans (repo_id, pr_number, commit_sha, pr_url, verdict, severity, cwe_id, confidence, title, provider, scan_ms)
       VALUES (${repoId}, ${payload.pr_number ?? null}, ${payload.commit_sha.slice(0, 40)},
               ${payload.pr_url ?? null}, ${payload.verdict}, ${payload.severity ?? null},
-              ${payload.cwe_id ?? null}, ${confidence}, ${title},
+              ${cweId}, ${confidence}, ${title},
               ${payload.provider ?? null}, ${payload.scan_ms ?? null})`;
 
     // Phase 4: persist aegisdiff-ignore suppressions as ignore_rules so they
     // show up in the dashboard and apply to future scans of the same repo.
     if (payload.suppressed && (payload.cwe_id || payload.ignore_reason)) {
-      const cwe = payload.cwe_id && payload.cwe_id !== "N/A" ? payload.cwe_id : null;
+      const cwe = cweId && cweId !== "N/A" ? cweId : null;
       const reason = payload.ignore_reason?.slice(0, 200) ?? null;
       await sql`
         INSERT INTO ignore_rules (repo_id, cwe_id, reason)
