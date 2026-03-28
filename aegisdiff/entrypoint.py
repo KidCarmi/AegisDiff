@@ -183,7 +183,7 @@ def main() -> None:
     ]
 
     # ── Build provider list ────────────────────────────────────────────────
-    # Priority: OpenRouter llama-3.3-70b:free → OpenRouter mistral-7b:free
+    # Priority: OpenRouter llama-3.3-70b:free → OpenRouter gemma-3-9b:free
     # Cerebras is excluded: GitHub Actions (Azure IPs) are blocked by Cerebras WAF.
     # Platform keys via OIDC appended as fallback after user keys.
     providers = []
@@ -193,8 +193,8 @@ def main() -> None:
         logger.info("Provider: OpenRouter llama-3.3-70b:free (user key %d/%d)", i, n_or)
     # Secondary OpenRouter model per key — less congested free-tier fallback
     for i, key in enumerate(openrouter_keys, start=1):
-        providers.append(OpenRouterProvider(key, model="mistralai/mistral-7b-instruct:free"))
-        logger.info("Provider: OpenRouter mistral-7b:free (user key %d/%d)", i, n_or)
+        providers.append(OpenRouterProvider(key, model="google/gemma-3-9b-it:free"))
+        logger.info("Provider: OpenRouter gemma-3-9b:free (user key %d/%d)", i, n_or)
 
     oidc = _get_oidc_token()
     if oidc and cfg.aegisdiff_ingest_url:
@@ -209,8 +209,8 @@ def main() -> None:
             providers.append(OpenRouterProvider(key))
             logger.info("Provider: OpenRouter llama-3.3-70b:free (platform %d/%d)", i, n_por)
         for i, key in enumerate(platform_openrouter, start=1):
-            providers.append(OpenRouterProvider(key, model="mistralai/mistral-7b-instruct:free"))
-            logger.info("Provider: OpenRouter mistral-7b:free (platform %d/%d)", i, n_por)
+            providers.append(OpenRouterProvider(key, model="google/gemma-3-9b-it:free"))
+            logger.info("Provider: OpenRouter gemma-3-9b:free (platform %d/%d)", i, n_por)
 
     # ── GitHub Models — zero-config last-resort fallback ──────────────────
     # GITHUB_TOKEN is always injected into every Actions run — no extra secrets.

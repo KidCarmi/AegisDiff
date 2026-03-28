@@ -6,7 +6,8 @@ standard GITHUB_TOKEN that is always injected into every GitHub
 Actions run — no extra secrets required.
 
 Free tier: limited RPM/TPD, but always available as last-resort fallback.
-Models: meta/Llama-3.3-70B-Instruct, gpt-4o-mini, mistral-nemo, etc.
+Model identifier format: just the model name WITHOUT publisher namespace
+  (e.g. "Llama-3.3-70B-Instruct" not "meta/Llama-3.3-70B-Instruct")
 
 Docs: https://docs.github.com/en/github-models
 """
@@ -38,7 +39,7 @@ _TOO_LARGE_PHRASES = (
 
 class GitHubModelsProvider(LLMProvider):
     name = "github_models"
-    model = "meta/Llama-3.3-70B-Instruct"
+    model = "Llama-3.3-70B-Instruct"  # No namespace prefix — inference API uses bare model name
     max_context_tokens = 6_000  # Conservative for free-tier burst limits
 
     def __init__(self, github_token: str, model: str | None = None) -> None:

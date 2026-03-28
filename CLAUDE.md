@@ -35,9 +35,10 @@ scripts/         local_scan.py for manual testing
    severity, CWE ID, confidence, title, provider, timing. No code, no diffs, no
    evidence strings. Evidence lives ONLY in the GitHub PR comment.
 
-2. **LLM provider priority: OpenRouter llama-3.3-70b:free → OpenRouter mistral-7b-instruct:free → GitHub Models (GITHUB_TOKEN fallback).**
+2. **LLM provider priority: OpenRouter llama-3.3-70b:free → OpenRouter gemma-3-9b-it:free → GitHub Models (GITHUB_TOKEN fallback).**
    Cerebras is excluded — GitHub Actions (Azure IPs) are blocked by Cerebras WAF.
-   Groq, Gemini, SambaNova, llama-4-maverick, deepseek-chat-v3-0324 have been removed. Do not re-add them.
+   Groq, Gemini, SambaNova, llama-4-maverick, deepseek-chat-v3-0324, mistral-7b-instruct have been removed. Do not re-add them.
+   GitHub Models model ID is bare name: `Llama-3.3-70B-Instruct` (NOT `meta/Llama-3.3-70B-Instruct` — namespace prefix causes 400).
    GitHub Models uses the always-present `GITHUB_TOKEN` — zero-config last resort.
 
 3. **Verdict JSON schema is backwards-compatible.** `parse_verdict()` in
@@ -73,17 +74,17 @@ User keys (OPENROUTER_API_KEY 1/2/3):
   1. OpenRouter llama-3.3-70b-instruct:free  (key 1)
   2. OpenRouter llama-3.3-70b-instruct:free  (key 2)
   3. OpenRouter llama-3.3-70b-instruct:free  (key 3)
-  4. OpenRouter mistral-7b-instruct:free   (key 1)
-  5. OpenRouter mistral-7b-instruct:free   (key 2)
-  6. OpenRouter mistral-7b-instruct:free   (key 3)
+  4. OpenRouter gemma-3-9b-it:free     (key 1)
+  5. OpenRouter gemma-3-9b-it:free     (key 2)
+  6. OpenRouter gemma-3-9b-it:free     (key 3)
 
 Platform keys (via OIDC → /api/llm-token, 100 scans/day):
   7. OpenRouter llama-3.3-70b-instruct:free  (platform key 1)
   8. OpenRouter llama-3.3-70b-instruct:free  (platform key 2/3)
-  9. OpenRouter mistral-7b-instruct:free   (platform keys)
+  9. OpenRouter gemma-3-9b-it:free     (platform keys)
 
 Zero-config fallback (always present in Actions):
-  10. GitHub Models meta/Llama-3.3-70B-Instruct  (GITHUB_TOKEN)
+  10. GitHub Models Llama-3.3-70B-Instruct  (GITHUB_TOKEN)
 ```
 
 Rate limits: OpenRouter free tier = 8 req/min per key per model.
@@ -173,7 +174,7 @@ npm run build                   # Production build
 | File | Purpose |
 |---|---|
 | `aegisdiff/llm/orchestrator.py` | Failover + retry + adaptive 413 trimming |
-| `aegisdiff/llm/providers/openrouter.py` | OpenRouter :free models (llama-3.3-70b primary, mistral-7b-instruct secondary) |
+| `aegisdiff/llm/providers/openrouter.py` | OpenRouter :free models (llama-3.3-70b primary, gemma-3-9b-it secondary) |
 | `aegisdiff/llm/providers/github_models.py` | GitHub Models (GITHUB_TOKEN, zero-config last-resort fallback) |
 | `aegisdiff/llm/providers/cerebras.py` | Cerebras (kept on disk, NOT wired in — Azure IP blocked) |
 | `aegisdiff/code_context/extractor.py` | AST sink/source detection (Python/JS/TS/Go/Java/Ruby/PHP) |
