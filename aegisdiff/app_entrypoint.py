@@ -170,9 +170,14 @@ def main() -> None:
     for i, key in enumerate(cerebras_keys, start=1):
         providers.append(CerebrasProvider(key))
         logger.info("Provider: Cerebras llama-3.3-70b (key %d/%d)", i, len(cerebras_keys))
+    n_or = len(openrouter_keys)
     for i, key in enumerate(openrouter_keys, start=1):
         providers.append(OpenRouterProvider(key))
-        logger.info("Provider: OpenRouter :free (key %d/%d)", i, len(openrouter_keys))
+        logger.info("Provider: OpenRouter llama-3.3-70b:free (key %d/%d)", i, n_or)
+    # Secondary model per key — less congested free-tier fallback
+    for i, key in enumerate(openrouter_keys, start=1):
+        providers.append(OpenRouterProvider(key, model="qwen/qwen-2.5-72b-instruct:free"))
+        logger.info("Provider: OpenRouter qwen-2.5-72b:free (key %d/%d)", i, n_or)
 
     orchestrator = LLMOrchestrator(providers, max_retries_per_provider=3)
     engine = TriageEngine(orchestrator, repo_root=Path("."))

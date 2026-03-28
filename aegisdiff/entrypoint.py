@@ -196,10 +196,15 @@ def main() -> None:
     providers = []
     for i, key in enumerate(cerebras_keys, start=1):
         providers.append(CerebrasProvider(key))
-        logger.info("Provider: Cerebras llama3.3-70b (user key %d/%d)", i, len(cerebras_keys))
+        logger.info("Provider: Cerebras llama-3.3-70b (user key %d/%d)", i, len(cerebras_keys))
+    n_or = len(openrouter_keys)
     for i, key in enumerate(openrouter_keys, start=1):
         providers.append(OpenRouterProvider(key))
-        logger.info("Provider: OpenRouter :free (user key %d/%d)", i, len(openrouter_keys))
+        logger.info("Provider: OpenRouter llama-3.3-70b:free (user key %d/%d)", i, n_or)
+    # Secondary OpenRouter model per key — less congested free-tier fallback
+    for i, key in enumerate(openrouter_keys, start=1):
+        providers.append(OpenRouterProvider(key, model="qwen/qwen-2.5-72b-instruct:free"))
+        logger.info("Provider: OpenRouter qwen-2.5-72b:free (user key %d/%d)", i, n_or)
 
     oidc = _get_oidc_token()
     if oidc and cfg.aegisdiff_ingest_url:
@@ -213,9 +218,13 @@ def main() -> None:
         for i, key in enumerate(platform_cerebras, start=1):
             providers.append(CerebrasProvider(key))
             logger.info("Provider: Cerebras (platform %d/%d)", i, len(platform_cerebras))
+        n_por = len(platform_openrouter)
         for i, key in enumerate(platform_openrouter, start=1):
             providers.append(OpenRouterProvider(key))
-            logger.info("Provider: OpenRouter (platform %d/%d)", i, len(platform_openrouter))
+            logger.info("Provider: OpenRouter llama-3.3-70b:free (platform %d/%d)", i, n_por)
+        for i, key in enumerate(platform_openrouter, start=1):
+            providers.append(OpenRouterProvider(key, model="qwen/qwen-2.5-72b-instruct:free"))
+            logger.info("Provider: OpenRouter qwen-2.5-72b:free (platform %d/%d)", i, n_por)
 
     if not providers:
         logger.error(

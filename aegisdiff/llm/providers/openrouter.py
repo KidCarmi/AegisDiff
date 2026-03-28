@@ -35,8 +35,10 @@ class OpenRouterProvider(LLMProvider):
     model = "meta-llama/llama-3.3-70b-instruct:free"
     max_context_tokens = 6_000  # Conservative below free-tier burst limit
 
-    def __init__(self, api_key: str) -> None:
+    def __init__(self, api_key: str, model: str | None = None) -> None:
         self._api_key = api_key
+        if model is not None:
+            self.model = model
 
     def complete(self, request: LLMRequest) -> LLMResponse:
         payload = {
