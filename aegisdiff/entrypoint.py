@@ -169,6 +169,7 @@ def main() -> None:
         format_verdict_comment,
     )
     from .llm.orchestrator import LLMOrchestrator
+    from .llm.providers.github_models import GitHubModelsProvider
     from .llm.providers.openrouter import OpenRouterProvider
     from .triage.engine import TriageEngine
     from .triage.verdicts import VerdictType
@@ -210,6 +211,12 @@ def main() -> None:
         for i, key in enumerate(platform_openrouter, start=1):
             providers.append(OpenRouterProvider(key, model="meta-llama/llama-4-maverick:free"))
             logger.info("Provider: OpenRouter llama-4-maverick:free (platform %d/%d)", i, n_por)
+
+    # ── GitHub Models — zero-config last-resort fallback ──────────────────
+    # GITHUB_TOKEN is always injected into every Actions run — no extra secrets.
+    if cfg.github_token:
+        providers.append(GitHubModelsProvider(cfg.github_token))
+        logger.info("Provider: GitHub Models Llama-3.3-70B (zero-config fallback)")
 
     if not providers:
         logger.error(

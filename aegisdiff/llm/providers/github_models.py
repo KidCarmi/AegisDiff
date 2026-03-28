@@ -1,4 +1,15 @@
-"""Groq (Llama-3-70b) provider — fallback LLM engine."""
+"""GitHub Models provider — zero-config fallback using GITHUB_TOKEN.
+
+GitHub Models exposes an OpenAI-compatible API at
+https://models.inference.ai.azure.com. Authentication uses the
+standard GITHUB_TOKEN that is always injected into every GitHub
+Actions run — no extra secrets required.
+
+Free tier: limited RPM/TPD, but always available as last-resort fallback.
+Models: meta/Llama-3.3-70B-Instruct, gpt-4o-mini, mistral-nemo, etc.
+
+Docs: https://docs.github.com/en/github-models
+"""
 
 from __future__ import annotations
 
@@ -9,29 +20,30 @@ import httpx
 
 from .base import LLMProvider, LLMRequest, LLMResponse
 
-GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+GITHUB_MODELS_URL = "https://models.inference.ai.azure.com/chat/completions"
 
 logger = logging.getLogger(__name__)
 
-# Groq error substrings that indicate the request is too large
-_GROQ_TOO_LARGE_PHRASES = (
+_TOO_LARGE_PHRASES = (
     "too large",
     "too long",
     "reduce",
     "context_length_exceeded",
     "maximum context",
     "tokens per",
+    "token limit",
+    "exceeds",
 )
 
 
-class GroqProvider(LLMProvider):
-    name = "groq"
-    model = "llama-3.3-70b-versatile"
-    max_context_tokens = 5_500  # Conservative: free-tier burst + HTTP body limit headroom
+class GitHubModelsProvider(LLMProvider):
+    name = "github_models"
+    model = "meta/Llama-3.3-70B-Instruct"
+    max_context_tokens = 6_000  # Conservative for free-tier burst limits
 
-    def __init__(self, api_key: str, model: str | None = None) -> None:
-        self._api_key = api_key
-        if model:
+    def __init__(self, github_token: str, model: str | None = None) -> None:
+        self._token = github_token
+        if model is not None:
             self.model = model
 
     def complete(self, request: LLMRequest) -> LLMResponse:
@@ -44,32 +56,27 @@ class GroqProvider(LLMProvider):
             "max_tokens": request.max_tokens,
             "temperature": request.temperature,
         }
-        headers = {"Authorization": f"Bearer {self._api_key}"}
+        headers = {
+            "Authorization": f"Bearer {self._token}",
+            "Content-Type": "application/json",
+        }
         t0 = time.monotonic()
         resp = httpx.post(
-            GROQ_API_URL,
+            GITHUB_MODELS_URL,
             json=payload,
             headers=headers,
-            timeout=30.0,
+            timeout=60.0,
         )
         if not resp.is_success:
-            # Log Groq's error body before raising so we can diagnose failures.
-            # Also rewrite 400 → 413 when Groq signals the request is too large,
-            # so the orchestrator's adaptive trimming kicks in.
             try:
                 err_body = resp.json()
                 err_msg = err_body.get("error", {}).get("message", "")
             except Exception:
                 err_msg = resp.text[:300]
-            logger.warning("Groq HTTP %d: %s", resp.status_code, err_msg)
+            logger.warning("GitHub Models HTTP %d: %s", resp.status_code, err_msg)
 
             if resp.status_code == 400:
-                # Rewrite to 413 when Groq signals context too large so the
-                # orchestrator's adaptive trimming kicks in.
-                # Also catch the case where Groq returns a plain 400 with no
-                # matching phrase — still rewrite to 413 as a safe fallback
-                # because a non-413 400 from Groq is almost always a size issue.
-                is_size_error = any(phrase in err_msg.lower() for phrase in _GROQ_TOO_LARGE_PHRASES)
+                is_size_error = any(phrase in err_msg.lower() for phrase in _TOO_LARGE_PHRASES)
                 if is_size_error or not err_msg:
                     synthetic = httpx.Response(
                         status_code=413,
@@ -78,14 +85,11 @@ class GroqProvider(LLMProvider):
                         request=resp.request,
                     )
                     raise httpx.HTTPStatusError(
-                        f"Groq 400 rewritten to 413 (context too large): {err_msg}",
+                        f"GitHub Models 400 rewritten to 413: {err_msg}",
                         request=resp.request,
                         response=synthetic,
                     )
-                # Known non-size 400 (e.g. invalid model, bad request format) —
-                # raise with the actual API error body so it surfaces in the dashboard
-                logger.error("Groq 400 (non-size): %s", err_msg)
-                raise ValueError(f"Groq API 400: {err_msg}")
+                raise ValueError(f"GitHub Models API 400: {err_msg}")
 
         resp.raise_for_status()
         data = resp.json()
@@ -94,7 +98,7 @@ class GroqProvider(LLMProvider):
         try:
             content = data["choices"][0]["message"]["content"]
         except (KeyError, IndexError) as e:
-            raise ValueError(f"Groq response missing content: {data}") from e
+            raise ValueError(f"GitHub Models response missing content: {data}") from e
         usage = data.get("usage", {})
 
         return LLMResponse(

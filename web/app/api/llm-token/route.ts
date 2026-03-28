@@ -10,7 +10,7 @@
  * Auth:   GitHub Actions OIDC JWT (audience: "aegisdiff")
  * Limit:  FREE_TIER_DAILY_LIMIT scans per repo per 24 h (overridable
  *         per-repo by platform admin via /api/admin/rate-limit)
- * Bypass: User's own GEMINI_API_KEY / GROQ_API_KEY — entrypoint skips
+ * Bypass: User's own OPENROUTER_API_KEY — entrypoint skips
  *         this endpoint entirely when user keys are present.
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -68,7 +68,7 @@ export async function GET(req: NextRequest) {
       {
         error:
           `Rate limit reached: ${effectiveLimit} scans/day. ` +
-          `Add GEMINI_API_KEY or GROQ_API_KEY to your repo secrets for unlimited scans.`,
+          `Add OPENROUTER_API_KEY to your repo secrets for unlimited scans.`,
         scans_today: scansToday,
         limit: effectiveLimit,
       },

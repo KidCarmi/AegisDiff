@@ -35,9 +35,10 @@ scripts/         local_scan.py for manual testing
    severity, CWE ID, confidence, title, provider, timing. No code, no diffs, no
    evidence strings. Evidence lives ONLY in the GitHub PR comment.
 
-2. **LLM provider priority is OpenRouter llama-3.3-70b:free first, OpenRouter llama-4-maverick:free second.**
+2. **LLM provider priority: OpenRouter llama-3.3-70b:free → llama-4-maverick:free → GitHub Models (GITHUB_TOKEN fallback).**
    Cerebras is excluded — GitHub Actions (Azure IPs) are blocked by Cerebras WAF.
-   Gemini and Groq have been removed. Do not re-add them.
+   Groq, Gemini, SambaNova have been removed permanently. Do not re-add them.
+   GitHub Models uses the always-present `GITHUB_TOKEN` — zero-config last resort.
 
 3. **Verdict JSON schema is backwards-compatible.** `parse_verdict()` in
    `aegisdiff/triage/verdicts.py` must always handle missing keys gracefully.
@@ -58,12 +59,35 @@ scripts/         local_scan.py for manual testing
 
 8. **Platform key distribution is the zero-config path.** The engine must NOT
    hard-exit when no user LLM keys are configured — it must first try
-   `/api/llm-token` (OIDC-authenticated). Only exit if both user keys AND
-   platform keys are unavailable. User-provided keys always take priority.
+   `/api/llm-token` (OIDC-authenticated), then GitHub Models as last resort.
+   Only exit if ALL paths are unavailable. User-provided keys always take priority.
 
 9. **RBAC is derived from GitHub — never store role assignments in the DB.**
    Roles are resolved at request time from the GitHub API (org membership,
    repo permissions) and cached per session. No `memberships` table needed.
+
+## LLM Provider Stack (in priority order)
+
+```
+User keys (OPENROUTER_API_KEY 1/2/3):
+  1. OpenRouter llama-3.3-70b-instruct:free  (key 1)
+  2. OpenRouter llama-3.3-70b-instruct:free  (key 2)
+  3. OpenRouter llama-3.3-70b-instruct:free  (key 3)
+  4. OpenRouter llama-4-maverick:free        (key 1)
+  5. OpenRouter llama-4-maverick:free        (key 2)
+  6. OpenRouter llama-4-maverick:free        (key 3)
+
+Platform keys (via OIDC → /api/llm-token, 100 scans/day):
+  7. OpenRouter llama-3.3-70b-instruct:free  (platform key 1)
+  8. OpenRouter llama-3.3-70b-instruct:free  (platform key 2/3)
+  9. OpenRouter llama-4-maverick:free        (platform keys)
+
+Zero-config fallback (always present in Actions):
+  10. GitHub Models meta/Llama-3.3-70B-Instruct  (GITHUB_TOKEN)
+```
+
+Rate limits: OpenRouter free tier = 8 req/min per key per model.
+GitHub Models: conservative RPM, but always available as absolute last resort.
 
 ## RBAC Model
 
@@ -115,7 +139,7 @@ Never trust a role claim from the client — always re-resolve from GitHub API.
 ```bash
 # Python engine
 pip install -e .[dev]           # Install with dev dependencies
-pytest                          # Run all tests (105 tests, ~0.5s)
+pytest                          # Run all tests (~231 tests, ~2.5s)
 pytest tests/test_orchestrator.py -v
 ruff check aegisdiff/           # Lint (CI gate — must pass)
 ruff format aegisdiff/          # Format
@@ -150,16 +174,18 @@ npm run build                   # Production build
 |---|---|
 | `aegisdiff/llm/orchestrator.py` | Failover + retry + adaptive 413 trimming |
 | `aegisdiff/llm/providers/openrouter.py` | OpenRouter :free models (llama-3.3-70b primary, llama-4-maverick fallback) |
+| `aegisdiff/llm/providers/github_models.py` | GitHub Models (GITHUB_TOKEN, zero-config last-resort fallback) |
 | `aegisdiff/llm/providers/cerebras.py` | Cerebras (kept on disk, NOT wired in — Azure IP blocked) |
 | `aegisdiff/code_context/extractor.py` | AST sink/source detection (Python/JS/TS/Go/Java/Ruby/PHP) |
 | `aegisdiff/triage/prompts.py` | Cynical AppSec system prompt |
 | `aegisdiff/triage/verdicts.py` | Verdict parsing + calibration rules |
+| `aegisdiff/triage/sarif.py` | SARIF 2.1.0 builder for GitHub Code Scanning upload |
 | `aegisdiff/entrypoint.py` | OIDC auth + platform key fetch + inline PR comment |
 | `aegisdiff/app_entrypoint.py` | GitHub App path entrypoint (mirrors entrypoint.py) |
-| `aegisdiff/github/client.py` | GitHub API: PR comments + inline review comments |
-| `aegisdiff/github/app_client.py` | GitHub App installation token + diff fetch + review |
+| `aegisdiff/github/client.py` | GitHub API: PR comments + inline review comments + SARIF upload |
+| `aegisdiff/github/app_client.py` | GitHub App installation token + diff fetch + review + SARIF upload |
 | `aegisdiff/sentry.py` | Sentry init helper (no-op without SENTRY_DSN) |
-| `aegisdiff/config.py` | All env var loading (OPENROUTER_API_KEY, OPENROUTER_API_KEY_2) |
+| `aegisdiff/config.py` | All env var loading (OPENROUTER_API_KEY 1/2/3, GITHUB_TOKEN) |
 | `.github/workflows/aegisdiff.yml` | User-facing triage workflow (manual setup path) |
 | `.github/workflows/aegisdiff-app.yml` | GitHub App path workflow (repository_dispatch) |
 | `web/app/api/ingest/route.ts` | Receives scan metadata, fires webhooks |
@@ -230,7 +256,7 @@ Users need zero secrets. The engine fetches platform LLM keys from `/api/llm-tok
 via OIDC. Rate limit: **100 scans/day** per repo. User-provided keys always win.
 
 Vercel env vars required: `PLATFORM_OPENROUTER_API_KEY`, `PLATFORM_OPENROUTER_API_KEY_2`,
-`PLATFORM_ADMIN_GITHUB_IDS`.
+`PLATFORM_OPENROUTER_API_KEY_3`, `PLATFORM_ADMIN_GITHUB_IDS`.
 
 ### ✅ Phase 1 — RBAC (COMPLETE)
 
@@ -273,6 +299,14 @@ FALSE_POSITIVE feedback on a TRUE_POSITIVE auto-adds to `ignore_rules`.
 `RescanButton.tsx` component with loading/queued state.
 Ack comment posted: "🔄 Re-scan queued — results in ~90s."
 
+### ✅ Phase 7 — SARIF / GitHub Code Scanning (COMPLETE)
+
+TRUE_POSITIVE findings uploaded to GitHub Code Scanning API after every scan.
+`aegisdiff/triage/sarif.py` builds a valid SARIF 2.1.0 document.
+Both `entrypoint.py` and `app_entrypoint.py` call `upload_sarif()` (non-fatal on 403/404).
+Requires `security-events: write` permission in the workflow.
+Findings appear in the repo's Security tab alongside Dependabot and CodeQL alerts.
+
 ### ✅ Phase 8 — Trend Analytics & SLA Tracking (COMPLETE)
 
 Weekly digest cron (Monday 09:00 UTC) fires Slack/Discord/Teams webhooks per repo.
@@ -295,7 +329,7 @@ Changes must:
 2. Set `name`, `model`, `max_context_tokens` class attributes
 3. Implement `complete(request) -> LLMResponse` and `is_retryable_error(exc) -> bool`
 4. Ensure `is_retryable_error` returns `False` for 413 (orchestrator handles it)
-5. Add to provider list in `aegisdiff/entrypoint.py` (after OpenRouter)
-6. Add API key to `aegisdiff/config.py`
-7. Add key to `PLATFORM_*` env vars in Vercel
-8. Update `.github/workflows/aegisdiff.yml` env vars
+5. Add to provider list in `aegisdiff/entrypoint.py` (after OpenRouter, before GitHub Models)
+6. If key needed: add to `aegisdiff/config.py` and update `PLATFORM_*` env vars in Vercel
+7. Update `.github/workflows/aegisdiff.yml` env vars
+8. GitHub Models needs no extra steps — GITHUB_TOKEN is always available

@@ -13,11 +13,10 @@ Environment variables (all passed by the workflow):
   TARGET_REPO               — "owner/name"
   PR_NUMBER                 — pull request number
   COMMIT_SHA                — head commit SHA
-  CEREBRAS_API_KEY          — LLM primary key 1 (from our repo secrets)
-  CEREBRAS_API_KEY_2        — LLM primary key 2
-  CEREBRAS_API_KEY_3        — LLM primary key 3
-  OPENROUTER_API_KEY        — LLM fallback key 1 (from our repo secrets)
-  OPENROUTER_API_KEY_2      — LLM fallback key 2
+  OPENROUTER_API_KEY        — LLM key 1 (from our repo secrets)
+  OPENROUTER_API_KEY_2      — LLM key 2
+  OPENROUTER_API_KEY_3      — LLM key 3
+  GITHUB_TOKEN              — auto-injected by Actions; used as GitHub Models fallback
   AEGISDIFF_INGEST_URL      — dashboard ingest endpoint (passed via dispatch)
   AEGISDIFF_INGEST_TOKEN    — per-repo ingest token (passed via dispatch)
 """
@@ -103,6 +102,7 @@ def main() -> None:
         format_summary_comment,
     )
     from .llm.orchestrator import LLMOrchestrator
+    from .llm.providers.github_models import GitHubModelsProvider
     from .llm.providers.openrouter import OpenRouterProvider
     from .triage.engine import TriageEngine
     from .triage.verdicts import VerdictType
@@ -134,10 +134,6 @@ def main() -> None:
     ingest_url = os.environ.get("AEGISDIFF_INGEST_URL", "")
     ingest_token = os.environ.get("AEGISDIFF_INGEST_TOKEN", "")
 
-    if not openrouter_keys:
-        logger.error("No LLM API keys configured. Set OPENROUTER_API_KEY in this repo's secrets.")
-        sys.exit(1)
-
     owner, repo_name = target_repo.split("/", 1)
 
     # ── Fetch diff via GitHub App ─────────────────────────────────────────────
@@ -164,6 +160,18 @@ def main() -> None:
     for i, key in enumerate(openrouter_keys, start=1):
         providers.append(OpenRouterProvider(key, model="meta-llama/llama-4-maverick:free"))
         logger.info("Provider: OpenRouter llama-4-maverick:free (key %d/%d)", i, n_or)
+
+    # ── GitHub Models — zero-config last-resort fallback ─────────────────────
+    # GITHUB_APP_PRIVATE_KEY signs JWTs — but the Actions GITHUB_TOKEN also works
+    # for GitHub Models API. No extra secret needed.
+    github_token = os.environ.get("GITHUB_TOKEN", "")
+    if github_token:
+        providers.append(GitHubModelsProvider(github_token))
+        logger.info("Provider: GitHub Models Llama-3.3-70B (zero-config fallback)")
+
+    if not providers:
+        logger.error("No LLM keys configured. Set OPENROUTER_API_KEY in this repo's secrets.")
+        sys.exit(1)
 
     orchestrator = LLMOrchestrator(providers, max_retries_per_provider=3)
     engine = TriageEngine(orchestrator, repo_root=Path("."))
