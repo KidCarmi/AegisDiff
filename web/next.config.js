@@ -20,6 +20,7 @@ const securityHeaders = [
       "img-src 'self' data: https://avatars.githubusercontent.com",
       // /monitoring tunnels Sentry through our own origin — no external CSP entry needed
       "connect-src 'self' https://api.github.com",
+      "worker-src blob:",
       "frame-ancestors 'none'",
     ].join("; "),
   },
