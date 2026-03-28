@@ -6,7 +6,7 @@ import { DiscordForm } from "../discord/DiscordForm";
 import { TeamsForm } from "../teams/TeamsForm";
 import { NotifyForm } from "../notify/NotifyForm";
 
-type Tab = "integrations" | "notifications" | "ignore" | "usage";
+type Tab = "integrations" | "notifications" | "ignore" | "usage" | "protection";
 
 interface IgnoreRule {
   id: number;
@@ -284,6 +284,115 @@ function UsagePanel({ owner, name }: { owner: string; name: string }) {
   );
 }
 
+// ── Branch Protection panel ───────────────────────────────────────────────────
+
+function BranchProtectionPanel({ owner, name }: { owner: string; name: string }) {
+  const checkName = "AegisDiff / security";
+  const settingsUrl = `https://github.com/${owner}/${name}/settings/branches`;
+  const [copied, setCopied] = useState(false);
+
+  const copy = () => {
+    navigator.clipboard.writeText(checkName).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-1">
+          Require AegisDiff to pass
+        </h3>
+        <p className="text-xs text-gray-400 dark:text-gray-500">
+          Block merges when AegisDiff detects a high-confidence security issue. GitHub&apos;s
+          branch protection rules enforce the check — AegisDiff posts the result automatically
+          on every PR.
+        </p>
+      </div>
+
+      {/* Status check name */}
+      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4 space-y-3">
+        <p className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+          Status check name
+        </p>
+        <div className="flex items-center gap-2">
+          <code className="flex-1 rounded bg-gray-100 dark:bg-gray-800 px-3 py-2 text-sm font-mono text-gray-800 dark:text-gray-200 select-all">
+            {checkName}
+          </code>
+          <button
+            onClick={copy}
+            className="shrink-0 rounded border border-gray-200 dark:border-gray-700 px-3 py-2 text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+          >
+            {copied ? "Copied!" : "Copy"}
+          </button>
+        </div>
+      </div>
+
+      {/* Steps */}
+      <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4 space-y-4">
+        <p className="text-xs font-semibold text-gray-700 dark:text-gray-200">Setup steps</p>
+        <ol className="space-y-3 text-sm text-gray-600 dark:text-gray-300">
+          <li className="flex gap-3">
+            <span className="shrink-0 flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-xs font-bold mt-0.5">
+              1
+            </span>
+            <span>
+              Open a pull request on <strong>{owner}/{name}</strong> so AegisDiff runs once and
+              the check name appears in GitHub.
+            </span>
+          </li>
+          <li className="flex gap-3">
+            <span className="shrink-0 flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-xs font-bold mt-0.5">
+              2
+            </span>
+            <span>
+              Go to{" "}
+              <a
+                href={settingsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-600 dark:text-blue-400 hover:underline"
+              >
+                Branch protection rules ↗
+              </a>{" "}
+              and add or edit the rule for your default branch.
+            </span>
+          </li>
+          <li className="flex gap-3">
+            <span className="shrink-0 flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-xs font-bold mt-0.5">
+              3
+            </span>
+            <span>
+              Enable <strong>Require status checks to pass before merging</strong>, then search for
+              and add the check name above.
+            </span>
+          </li>
+          <li className="flex gap-3">
+            <span className="shrink-0 flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-xs font-bold mt-0.5">
+              4
+            </span>
+            <span>
+              Save. Future PRs with a high-confidence finding will be blocked from merging
+              automatically.
+            </span>
+          </li>
+        </ol>
+      </div>
+
+      {/* Behavior note */}
+      <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950 p-4 text-xs text-amber-700 dark:text-amber-300 space-y-1">
+        <p className="font-semibold">When does AegisDiff block a merge?</p>
+        <p>
+          Only when verdict is <strong>TRUE_POSITIVE</strong> with confidence ≥ 80%. False
+          positives and low-confidence findings post a{" "}
+          <span className="font-mono">pending</span> status that does not block merging.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ── Tab bar ───────────────────────────────────────────────────────────────────
 
 const TABS: { id: Tab; label: string }[] = [
@@ -291,6 +400,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "notifications", label: "Notifications" },
   { id: "ignore", label: "Ignore Rules" },
   { id: "usage", label: "Usage" },
+  { id: "protection", label: "Branch Protection" },
 ];
 
 // ── Main export ───────────────────────────────────────────────────────────────
@@ -346,6 +456,8 @@ export function RepoSettingsTabs({ owner, name }: { owner: string; name: string 
       {tab === "ignore" && <IgnoreRulesPanel owner={owner} name={name} />}
 
       {tab === "usage" && <UsagePanel owner={owner} name={name} />}
+
+      {tab === "protection" && <BranchProtectionPanel owner={owner} name={name} />}
     </div>
   );
 }

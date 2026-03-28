@@ -315,6 +315,14 @@ def main() -> None:
     )
     logger.info("PR comment posted to %s#%d", target_repo, pr_number)
 
+    # ── Commit status (enables "Require AegisDiff to pass" branch protection) ─
+    from .entrypoint import _verdict_to_status
+
+    status_state, status_desc = _verdict_to_status(verdict)
+    app_client.post_commit_status(
+        installation_id, owner, repo_name, commit_sha, status_state, status_desc
+    )
+
     # ── GitHub Code Scanning (SARIF upload) ──────────────────────────────────
     # Upload findings so they appear in the Security tab. Non-fatal.
     # Requires the GitHub App to have the `security_events` permission.

@@ -250,6 +250,42 @@ class GitHubAppClient:
                 timeout=15.0,
             ).raise_for_status()
 
+    # ── Commit status ─────────────────────────────────────────────────────────
+
+    def post_commit_status(
+        self,
+        installation_id: int,
+        owner: str,
+        repo: str,
+        sha: str,
+        state: str,
+        description: str,
+        context: str = "AegisDiff / security",
+    ) -> None:
+        """
+        Post a GitHub commit status on `sha`.
+
+        `state` must be one of: success | failure | pending | error.
+        Mirrors GitHubClient.post_commit_status but authenticates via App token.
+        Non-fatal — logs a warning on any error.
+        """
+        try:
+            token = self.get_installation_token(installation_id)
+            resp = httpx.post(
+                f"{self.BASE_URL}/repos/{owner}/{repo}/statuses/{sha}",
+                headers={"Authorization": f"Bearer {token}", "Accept": self.ACCEPT},
+                json={
+                    "state": state,
+                    "description": description[:140],
+                    "context": context,
+                },
+                timeout=10.0,
+            )
+            resp.raise_for_status()
+            logger.info("Posted commit status '%s' on %s/%s@%s", state, owner, repo, sha[:7])
+        except Exception as exc:
+            logger.warning("Failed to post commit status (non-fatal): %s", exc)
+
     def upload_sarif(
         self,
         installation_id: int,
