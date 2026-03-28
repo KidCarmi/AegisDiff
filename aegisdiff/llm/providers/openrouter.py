@@ -53,7 +53,7 @@ class OpenRouterProvider(LLMProvider):
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             # OpenRouter strongly recommends these headers for free-tier routing
-            "HTTP-Referer": "https://aegis-diff.vercel.app",
+            "HTTP-Referer": "https://aegisdiff.orelsec.com",
             "X-Title": "AegisDiff",
         }
         t0 = time.monotonic()

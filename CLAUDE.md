@@ -46,7 +46,7 @@ scripts/                local_scan.py for manual testing
    severity, CWE ID, confidence, title, provider, timing. No code, no diffs, no
    evidence strings. Evidence lives ONLY in the GitHub PR comment.
 
-2. **LLM provider priority: OpenRouter llama-3.3-70b:free → OpenRouter gemma-3-9b-it:free → GitHub Models (GITHUB_TOKEN fallback).**
+2. **LLM provider priority: OpenRouter llama-3.3-70b:free → OpenRouter gemma-3-27b-it:free → GitHub Models (GITHUB_TOKEN fallback).**
    Cerebras is excluded — GitHub Actions (Azure IPs) are blocked by Cerebras WAF.
    Groq, Gemini, SambaNova, llama-4-maverick, deepseek-chat-v3-0324, mistral-7b-instruct have been removed. Do not re-add them.
    GitHub Models model ID is bare name: `Llama-3.3-70B-Instruct` (NOT `meta/Llama-3.3-70B-Instruct` — namespace prefix causes 400).
@@ -85,17 +85,17 @@ User keys (OPENROUTER_API_KEY 1/2/3):
   1. OpenRouter llama-3.3-70b-instruct:free  (key 1)
   2. OpenRouter llama-3.3-70b-instruct:free  (key 2)
   3. OpenRouter llama-3.3-70b-instruct:free  (key 3)
-  4. OpenRouter gemma-3-9b-it:free     (key 1)
-  5. OpenRouter gemma-3-9b-it:free     (key 2)
-  6. OpenRouter gemma-3-9b-it:free     (key 3)
+  4. OpenRouter gemma-3-27b-it:free     (key 1)
+  5. OpenRouter gemma-3-27b-it:free     (key 2)
+  6. OpenRouter gemma-3-27b-it:free     (key 3)
 
 Platform keys (via OIDC → /api/llm-token, 100 scans/day):
   7. OpenRouter llama-3.3-70b-instruct:free  (platform key 1)
   8. OpenRouter llama-3.3-70b-instruct:free  (platform key 2)
   9. OpenRouter llama-3.3-70b-instruct:free  (platform key 3)
-  10. OpenRouter gemma-3-9b-it:free           (platform key 1)
-  11. OpenRouter gemma-3-9b-it:free           (platform key 2)
-  12. OpenRouter gemma-3-9b-it:free           (platform key 3)
+  10. OpenRouter gemma-3-27b-it:free           (platform key 1)
+  11. OpenRouter gemma-3-27b-it:free           (platform key 2)
+  12. OpenRouter gemma-3-27b-it:free           (platform key 3)
 
 Zero-config fallback (always present in Actions):
   13. GitHub Models Llama-3.3-70B-Instruct  (GITHUB_TOKEN)

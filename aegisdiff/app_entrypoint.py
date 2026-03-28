@@ -176,7 +176,7 @@ def main() -> None:
 
     # ── Build providers ───────────────────────────────────────────────────────
     # Cerebras excluded: GitHub Actions (Azure IPs) are blocked by Cerebras WAF.
-    # Priority: OpenRouter llama-3.3-70b:free → OpenRouter gemma-3-9b:free
+    # Priority: OpenRouter llama-3.3-70b:free → OpenRouter gemma-3-27b:free
     providers = []
     n_or = len(openrouter_keys)
     for i, key in enumerate(openrouter_keys, start=1):
@@ -184,8 +184,8 @@ def main() -> None:
         logger.info("Provider: OpenRouter llama-3.3-70b:free (key %d/%d)", i, n_or)
     # Secondary model per key — less congested free-tier fallback
     for i, key in enumerate(openrouter_keys, start=1):
-        providers.append(OpenRouterProvider(key, model="google/gemma-3-9b-it:free"))
-        logger.info("Provider: OpenRouter gemma-3-9b:free (key %d/%d)", i, n_or)
+        providers.append(OpenRouterProvider(key, model="google/gemma-3-27b-it:free"))
+        logger.info("Provider: OpenRouter gemma-3-27b:free (key %d/%d)", i, n_or)
 
     # ── GitHub Models — zero-config last-resort fallback ─────────────────────
     # GITHUB_APP_PRIVATE_KEY signs JWTs — but the Actions GITHUB_TOKEN also works

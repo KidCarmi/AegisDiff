@@ -313,7 +313,7 @@ class TestRequiredHeaders:
         provider.complete(SAMPLE_REQUEST)
 
         sent_request = route.calls.last.request
-        assert sent_request.headers["HTTP-Referer"] == "https://aegis-diff.vercel.app"
+        assert sent_request.headers["HTTP-Referer"] == "https://aegisdiff.orelsec.com"
 
     @respx.mock
     def test_x_title_header_sent(self):
