@@ -104,11 +104,13 @@ jobs:
     name: AppSec Self-Scan
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Only run when LLM keys are available (skips forks without secrets)
+    # Opt-in only — set AEGISDIFF_SELF_SCAN=true in repo variables to enable.
+    # Disabled by default because the GitHub App already scans this repo's PRs.
+    # Enabling both causes duplicate comments on every PR.
     if: >
+      vars.AEGISDIFF_SELF_SCAN == 'true' &&
       (github.event_name == 'pull_request' ||
-       github.event_name == 'push') &&
-      vars.AEGISDIFF_SELF_SCAN != 'false'
+       github.event_name == 'push')
 
     steps:
       - name: Checkout
