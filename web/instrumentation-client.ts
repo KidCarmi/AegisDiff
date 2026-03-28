@@ -18,10 +18,15 @@ Sentry.init({
     }),
   ],
 
-  // Don't report 401/403 navigation errors — expected for unauthenticated users
-  beforeSend(event) {
+  // Don't report expected non-errors:
+  // - 401/403 navigation errors (unauthenticated users hitting protected routes)
+  // - NEXT_REDIRECT (Next.js redirect() throws internally — not a real error)
+  // - NEXT_NOT_FOUND (notFound() throws internally — not a real error)
+  beforeSend(event, hint) {
     const status = event.extra?.status ?? (event.contexts?.response as any)?.status_code;
     if (status === 401 || status === 403) return null;
+    const err = hint?.originalException as any;
+    if (err?.digest === "NEXT_REDIRECT" || err?.digest === "NEXT_NOT_FOUND") return null;
     return event;
   },
 

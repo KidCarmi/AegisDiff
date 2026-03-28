@@ -50,7 +50,8 @@ const nextConfig = {
 module.exports = withSentryConfig(nextConfig, {
   // Sentry organisation + project — set SENTRY_ORG / SENTRY_PROJECT env vars
   // in your Vercel project to enable source-map uploads on deploy.
-  silent: !process.env.CI,           // suppress noise locally, show in CI
+  silent: !process.env.CI,                     // suppress noise locally, show in CI
+  ignoreMissingSourceMapWarnings: true,         // suppress chunk sourcemap warnings
   hideSourceMaps: true,              // don't ship source maps to the browser
   tunnelRoute: "/monitoring",        // proxy errors through our origin (bypasses ad-blockers)
   widenClientFileUpload: true,       // upload more source files for better stack traces
