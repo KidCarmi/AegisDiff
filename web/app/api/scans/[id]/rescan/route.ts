@@ -12,7 +12,7 @@ import { authOptions } from "../../../../../lib/auth";
 import { requireRepoRole } from "../../../../../lib/rbac";
 import { sql } from "../../../../../lib/db";
 import { createHmac } from "crypto";
-import { generateAppJWT, getInstallationToken } from "../../../../../lib/github-app";
+import { getInstallationToken } from "../../../../../lib/github-app";
 
 const MAX_RESCANS_PER_HOUR = 3;
 
@@ -113,8 +113,7 @@ export async function POST(
     let headSha = commit_sha;
     if (installation_id) {
       try {
-        const jwt = await generateAppJWT();
-        const installToken = await getInstallationToken(jwt, Number(installation_id));
+        const installToken = await getInstallationToken(Number(installation_id));
         const prResp = await fetch(
           `https://api.github.com/repos/${owner}/${name}/pulls/${pr_number}`,
           {
