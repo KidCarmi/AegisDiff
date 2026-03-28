@@ -1,6 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
+import { signOut } from "next-auth/react";
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import icon from "../public/icon-192.png";
@@ -63,6 +64,19 @@ function ThemeToggle() {
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
         </svg>
       )}
+    </button>
+  );
+}
+
+function SignOutButton() {
+  const [signingOut, setSigningOut] = useState(false);
+  return (
+    <button
+      onClick={() => { setSigningOut(true); signOut({ callbackUrl: "/login" }); }}
+      disabled={signingOut}
+      className="ml-2 rounded-md border border-gray-200 dark:border-gray-700 px-3 py-1.5 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 transition-colors"
+    >
+      {signingOut ? "Signing out…" : "Sign out"}
     </button>
   );
 }
@@ -133,12 +147,7 @@ export function NavBar({ isAdmin = false }: { isAdmin?: boolean }) {
 
           <ThemeToggle />
 
-          <a
-            href="/api/auth/signout"
-            className="ml-2 rounded-md border border-gray-200 dark:border-gray-700 px-3 py-1.5 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-          >
-            Sign out
-          </a>
+          <SignOutButton />
         </div>
       </div>
     </nav>
