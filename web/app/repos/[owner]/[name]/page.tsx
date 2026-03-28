@@ -44,6 +44,25 @@ async function getRecentScans(owner: string, name: string): Promise<Scan[]> {
     ORDER BY s.created_at DESC LIMIT 30` as unknown as Scan[];
 }
 
+async function getUsage(owner: string, name: string) {
+  const DEFAULT_DAILY_LIMIT = 100;
+  const rows = await sql`
+    SELECT
+      r.custom_daily_limit,
+      COUNT(*) FILTER (WHERE s.created_at > NOW() - INTERVAL '24 hours') AS scans_today
+    FROM repos r
+    LEFT JOIN scans s ON s.repo_id = r.id
+    WHERE r.owner = ${owner} AND r.name = ${name}
+    GROUP BY r.id, r.custom_daily_limit
+  `;
+  const d = rows[0] as any;
+  const limit = d?.custom_daily_limit !== null && d?.custom_daily_limit !== undefined
+    ? Number(d.custom_daily_limit)
+    : DEFAULT_DAILY_LIMIT;
+  const used = Number(d?.scans_today ?? 0);
+  return { used, limit, remaining: Math.max(0, limit - used) };
+}
+
 async function getNotifySettings(owner: string, name: string) {
   const rows = await sql`
     SELECT notify_min_severity AS "minSeverity",
@@ -79,11 +98,12 @@ export default async function RepoDetailPage({ params }: Props) {
   const ok = await verifyRepoAccess(accessToken, owner, name);
   if (!ok) notFound();
 
-  const [stats, cwes, scans, notify] = await Promise.all([
+  const [stats, cwes, scans, notify, usage] = await Promise.all([
     getRepoStats(owner, name),
     getTopCWEs(owner, name),
     getRecentScans(owner, name),
     getNotifySettings(owner, name),
+    getUsage(owner, name),
   ]);
 
   const statCards = [
@@ -209,6 +229,41 @@ export default async function RepoDetailPage({ params }: Props) {
               ))}
             </div>
           </div>
+
+          {/* Platform scan quota */}
+          {(() => {
+            const pct = Math.round((usage.used / usage.limit) * 100);
+            const barColor =
+              pct >= 100 ? "bg-red-500" :
+              pct >= 90  ? "bg-red-400" :
+              pct >= 70  ? "bg-yellow-400" :
+              "bg-green-500";
+            const textColor =
+              pct >= 90 ? "text-red-600 dark:text-red-400" :
+              pct >= 70 ? "text-yellow-600 dark:text-yellow-400" :
+              "text-green-600 dark:text-green-400";
+            return (
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Platform Scans Today</h3>
+                  <span className={`text-xs font-semibold ${textColor}`}>
+                    {usage.used}/{usage.limit}
+                  </span>
+                </div>
+                <div className="w-full h-2 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${barColor}`}
+                    style={{ width: `${Math.min(pct, 100)}%` }}
+                  />
+                </div>
+                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1.5">
+                  {pct >= 100
+                    ? "Daily limit reached — add OPENROUTER_API_KEY or GROQ_API_KEY for unlimited scans."
+                    : `${usage.remaining} scan${usage.remaining !== 1 ? "s" : ""} remaining today`}
+                </p>
+              </div>
+            );
+          })()}
 
           {/* Badge */}
           <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4">
