@@ -97,6 +97,16 @@ export async function register() {
         created_at      TIMESTAMPTZ DEFAULT NOW()
       )`;
 
+    // ── Security: atomic LLM key issuance tracking (TOCTOU fix) ─────────────
+    await sql`
+      CREATE TABLE IF NOT EXISTS llm_token_issuances (
+        id          SERIAL PRIMARY KEY,
+        repo_owner  TEXT NOT NULL,
+        repo_name   TEXT NOT NULL,
+        issued_at   TIMESTAMPTZ DEFAULT NOW()
+      )`;
+    await sql`CREATE INDEX IF NOT EXISTS llm_token_issuances_repo_idx ON llm_token_issuances(repo_owner, repo_name, issued_at)`;
+
     // ── Phase 8: SLA tracking indexes ─────────────────────────────────────────
     // Speeds up SLA breach queries (verdict + severity + created_at filter)
     await sql`CREATE INDEX IF NOT EXISTS scans_verdict_severity_idx ON scans(verdict, severity, created_at)`;

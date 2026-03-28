@@ -1,7 +1,8 @@
 """
 LLM Orchestrator — provider failover with exponential backoff.
 
-Priority order: Gemini 1.5 Pro → Groq Llama-3.
+Priority order: OpenRouter llama-3.3-70b:free → OpenRouter gemma-3-9b-it:free
+               → GitHub Models Llama-3.3-70B-Instruct (GITHUB_TOKEN fallback).
 On retryable errors (429, timeout, 5xx): exponential backoff + jitter, up to max_retries.
 On non-retryable errors: immediately rotate to the next provider.
 If all providers are exhausted: raises RuntimeError.

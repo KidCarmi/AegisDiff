@@ -12,6 +12,7 @@ import { authOptions } from "../../../../../lib/auth";
 import { requireRepoRole } from "../../../../../lib/rbac";
 import { sql } from "../../../../../lib/db";
 import { createHmac } from "crypto";
+import { generateAppJWT, getInstallationToken } from "../../../../../lib/github-app";
 
 const MAX_RESCANS_PER_HOUR = 3;
 
@@ -107,6 +108,31 @@ export async function POST(
 
     const ingestToken = deriveRepoToken(repo);
 
+    // Fetch current PR HEAD SHA — the stored commit_sha may be stale if the
+    // PR received new commits since the original scan.
+    let headSha = commit_sha;
+    if (installation_id) {
+      try {
+        const jwt = await generateAppJWT();
+        const installToken = await getInstallationToken(jwt, installation_id);
+        const prResp = await fetch(
+          `https://api.github.com/repos/${owner}/${name}/pulls/${pr_number}`,
+          {
+            headers: {
+              Authorization: `Bearer ${installToken}`,
+              Accept: "application/vnd.github+json",
+            },
+          }
+        );
+        if (prResp.ok) {
+          const prData = await prResp.json();
+          headSha = prData.head?.sha ?? commit_sha;
+        }
+      } catch {
+        // Non-fatal — fall back to stored SHA
+      }
+    }
+
     const dispatchResp = await fetch(
       `https://api.github.com/repos/${engineRepo}/dispatches`,
       {
@@ -122,7 +148,7 @@ export async function POST(
             installation_id: installation_id,
             repo,
             pr_number,
-            head_sha: commit_sha,
+            head_sha: headSha,
             ingest_url: ingestUrl,
             ingest_token: ingestToken,
           },
@@ -144,7 +170,7 @@ export async function POST(
         'rescan_triggered',
         ${owner},
         ${name},
-        ${JSON.stringify({ scan_id: scanId, pr_number, commit_sha })}
+        ${JSON.stringify({ scan_id: scanId, pr_number, head_sha: headSha })}
       )
     `;
 
