@@ -1,6 +1,7 @@
 import { getServerSession } from "next-auth/next";
 import { redirect, notFound } from "next/navigation";
 import { authOptions, verifyRepoAccess } from "../../../../../lib/auth";
+import { NotificationLayout } from "../NotificationLayout";
 import { TeamsForm } from "./TeamsForm";
 
 interface Props { params: { owner: string; name: string } }
@@ -12,13 +13,8 @@ export default async function TeamsSettingsPage({ params }: Props) {
   if (!ok) notFound();
 
   return (
-    <div className="max-w-xl">
-      <a href={`/repos/${params.owner}/${params.name}`} className="text-sm text-blue-600 hover:underline">
-        ← {params.owner}/{params.name}
-      </a>
-      <h1 className="text-xl font-bold text-gray-900 mt-4 mb-1">Microsoft Teams Notifications</h1>
-      <p className="text-sm text-gray-500 mb-6 font-mono">{params.owner}/{params.name}</p>
+    <NotificationLayout owner={params.owner} name={params.name}>
       <TeamsForm owner={params.owner} name={params.name} />
-    </div>
+    </NotificationLayout>
   );
 }

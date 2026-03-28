@@ -32,26 +32,28 @@ export function NotifyForm({ owner, name }: { owner: string; name: string }) {
   }
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm space-y-6">
+    <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-6 shadow-sm space-y-6">
       {/* Min severity */}
       <div>
-        <label className="block text-sm font-semibold text-gray-700 mb-2">
+        <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
           Minimum severity to trigger notifications
         </label>
-        <p className="text-xs text-gray-400 mb-3">
+        <p className="text-xs text-gray-400 dark:text-gray-500 mb-3">
           Webhooks (Slack, Discord, Teams) only fire when the scan severity is at or above this level.
         </p>
         <div className="flex gap-2 flex-wrap">
           {SEVERITIES.map((s) => (
             <button key={s} onClick={() => setMinSeverity(s)}
               className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
-                minSeverity === s ? "bg-gray-900 text-white" : "border border-gray-200 text-gray-600 hover:bg-gray-50"
+                minSeverity === s
+                  ? "bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900"
+                  : "border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700"
               }`}>
               {s}
             </button>
           ))}
         </div>
-        <p className="mt-2 text-xs text-gray-400">
+        <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">
           Current: notify when severity ≥ <strong>{minSeverity}</strong>
         </p>
       </div>
@@ -63,10 +65,10 @@ export function NotifyForm({ owner, name }: { owner: string; name: string }) {
           className="mt-0.5 h-4 w-4 rounded border-gray-300 accent-gray-900"
         />
         <div>
-          <label htmlFor="nr" className="text-sm font-medium text-gray-700 cursor-pointer">
+          <label htmlFor="nr" className="text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer">
             Also notify on NEEDS_REVIEW
           </label>
-          <p className="text-xs text-gray-400 mt-0.5">
+          <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
             By default, webhooks only fire on TRUE_POSITIVE. Enable this to also alert on uncertain findings.
           </p>
         </div>
@@ -79,10 +81,10 @@ export function NotifyForm({ owner, name }: { owner: string; name: string }) {
           className="mt-0.5 h-4 w-4 rounded border-gray-300 accent-gray-900"
         />
         <div>
-          <label htmlFor="gi" className="text-sm font-medium text-gray-700 cursor-pointer">
+          <label htmlFor="gi" className="text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer">
             Auto-create GitHub Issue on TRUE_POSITIVE
           </label>
-          <p className="text-xs text-gray-400 mt-0.5">
+          <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
             Requires this repo to be installed via the GitHub App (uses installation token).
             Opens a &apos;security&apos;-labelled issue with the verdict details.
           </p>
@@ -90,7 +92,7 @@ export function NotifyForm({ owner, name }: { owner: string; name: string }) {
       </div>
 
       <button onClick={save} disabled={saving}
-        className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-50">
+        className="rounded-md bg-gray-900 dark:bg-gray-100 px-4 py-2 text-sm font-medium text-white dark:text-gray-900 hover:bg-gray-700 dark:hover:bg-gray-200 disabled:opacity-50">
         {saved ? "Saved ✓" : saving ? "Saving…" : "Save settings"}
       </button>
     </div>

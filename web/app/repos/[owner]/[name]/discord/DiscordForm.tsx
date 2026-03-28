@@ -47,26 +47,26 @@ export function DiscordForm({ owner, name }: { owner: string; name: string }) {
   }
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm space-y-4">
+    <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-6 shadow-sm space-y-4">
       {configured && masked && (
-        <div className="rounded-md bg-green-50 border border-green-200 px-4 py-3 flex items-center justify-between">
+        <div className="rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 px-4 py-3 flex items-center justify-between">
           <div>
-            <p className="text-sm font-medium text-green-800">Webhook configured</p>
-            <p className="text-xs text-green-700 font-mono mt-0.5">{masked}</p>
+            <p className="text-sm font-medium text-green-800 dark:text-green-300">Webhook configured</p>
+            <p className="text-xs text-green-700 dark:text-green-400 font-mono mt-0.5">{masked}</p>
           </div>
           <button onClick={remove} className="text-xs text-red-500 hover:underline">Remove</button>
         </div>
       )}
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
           {configured ? "Replace webhook URL" : "Discord Webhook URL"}
         </label>
         <input type="url"
           placeholder="https://discord.com/api/webhooks/123456/token"
           value={url} onChange={(e) => setUrl(e.target.value)}
-          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
-        <p className="mt-1 text-xs text-gray-400">
+        <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
           Discord server → Edit Channel → Integrations → Webhooks → New Webhook.
         </p>
       </div>
@@ -74,7 +74,7 @@ export function DiscordForm({ owner, name }: { owner: string; name: string }) {
         className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
         {saving ? "Saving…" : "Save webhook"}
       </button>
-      {status && <p className="text-sm text-gray-600">{status}</p>}
+      {status && <p className="text-sm text-gray-600 dark:text-gray-400">{status}</p>}
     </div>
   );
 }

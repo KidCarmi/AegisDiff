@@ -102,3 +102,79 @@ class TestVerdictFactories:
         v = Verdict.error("something went wrong")
         assert v.verdict == VerdictType.ERROR
         assert "something went wrong" in v.summary
+
+
+class TestInvalidJsonEscapeSanitization:
+    """The LLM sometimes copies regex patterns verbatim into JSON strings,
+    producing invalid escape sequences like \\1, \\d, \\s, \\w.
+    parse_verdict() must handle these gracefully."""
+
+    def _make_json(self, title: str) -> str:
+        """Build a raw JSON string with the given title (may contain bad escapes)."""
+        return (
+            '{"verdict":"TRUE_POSITIVE","severity":"HIGH","cwe_id":"CWE-89",'
+            '"confidence":0.9,'
+            f'"title":"{title}",'
+            '"summary":"test","evidence":"test","fix":"test"}'
+        )
+
+    def test_backslash_digit_in_title(self):
+        """\\1 from a regex backreference must not crash JSON parsing."""
+        raw = self._make_json(r"\1")
+        verdict = parse_verdict(raw)
+        assert verdict.verdict != VerdictType.ERROR, verdict.summary
+
+    def test_backslash_d_in_title(self):
+        r"""\\d from a regex character class must not crash JSON parsing."""
+        raw = self._make_json(r"\d+")
+        verdict = parse_verdict(raw)
+        assert verdict.verdict != VerdictType.ERROR, verdict.summary
+
+    def test_backslash_s_in_title(self):
+        r"""\\s from a regex whitespace class must not crash JSON parsing."""
+        raw = self._make_json(r"\s*")
+        verdict = parse_verdict(raw)
+        assert verdict.verdict != VerdictType.ERROR, verdict.summary
+
+    def test_backslash_w_in_title(self):
+        r"""\\w from a regex word class must not crash JSON parsing."""
+        raw = self._make_json(r"\w+")
+        verdict = parse_verdict(raw)
+        assert verdict.verdict != VerdictType.ERROR, verdict.summary
+
+    def test_backslash_cwe_pattern(self):
+        """CWE-\\1 backreference as seen in actual LLM output."""
+        raw = self._make_json(r"CWE-\1 injection")
+        verdict = parse_verdict(raw)
+        assert verdict.verdict != VerdictType.ERROR, verdict.summary
+
+    def test_multiple_invalid_escapes(self):
+        """Multiple bad escapes in one string must all be sanitized."""
+        raw = self._make_json(r"\d+\s*\w+\1")
+        verdict = parse_verdict(raw)
+        assert verdict.verdict != VerdictType.ERROR, verdict.summary
+
+    def test_valid_json_escapes_preserved(self):
+        """Standard JSON escapes (\\n, \\t, \\", \\\\) must not be corrupted."""
+        # Build JSON manually with valid escapes only
+        payload = {**VALID_JSON, "title": "line1\nline2\ttabbed"}
+        raw = json.dumps(payload)
+        verdict = parse_verdict(raw)
+        assert verdict.verdict != VerdictType.ERROR
+        assert "\n" in verdict.title or "line1" in verdict.title
+
+    def test_unicode_escape_preserved(self):
+        """\\uXXXX unicode escapes must survive sanitization."""
+        payload = {**VALID_JSON, "title": "SQL\u2019s injection"}
+        raw = json.dumps(payload)
+        verdict = parse_verdict(raw)
+        assert verdict.verdict != VerdictType.ERROR
+
+    def test_backslash_at_end_of_string(self):
+        """A trailing backslash in the JSON value must not raise an exception."""
+        # Manually build a string with a bare backslash before the closing quote
+        raw = '{"verdict":"TRUE_POSITIVE","severity":"HIGH","cwe_id":"CWE-89",' \
+              '"confidence":0.9,"title":"regex pattern\\","summary":"t","evidence":"t","fix":"t"}'
+        # This is invalid JSON even after sanitization — must return ERROR, not raise
+        verdict = parse_verdict(raw)
+        assert isinstance(verdict, Verdict)  # must return Verdict, not raise
