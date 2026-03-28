@@ -376,3 +376,162 @@ class TestJavaSinkDetection:
         code = 'public String search(@RequestParam String query) {'
         sources = ext._find_sources(code, {1}, "Controller.java")
         assert any(s.source_category == "annotation_param" for s in sources)
+
+
+class TestRubySinkDetection:
+    """Ruby sink and source pattern coverage."""
+
+    def _ext(self, tmp_path):
+        return CodeContextExtractor(tmp_path)
+
+    def test_detects_find_by_sql(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = 'User.find_by_sql("SELECT * FROM users WHERE name=\'#{params[:name]}\'")'
+        sinks = ext._find_sinks(code, {1}, "users_controller.rb")
+        assert any(s.sink_category == "sql_exec" for s in sinks)
+
+    def test_detects_system_cmd(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = "system(\"ls #{params[:dir]}\")"
+        sinks = ext._find_sinks(code, {1}, "jobs.rb")
+        assert any(s.sink_category == "cmd_exec" for s in sinks)
+
+    def test_detects_eval(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = "eval(params[:code])"
+        sinks = ext._find_sinks(code, {1}, "runner.rb")
+        assert any(s.sink_category == "eval_exec" for s in sinks)
+
+    def test_detects_marshal_load(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = "obj = Marshal.load(raw_data)"
+        sinks = ext._find_sinks(code, {1}, "deserializer.rb")
+        assert any(s.sink_category == "deserialize" for s in sinks)
+
+    def test_detects_redirect_to(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = "redirect_to(params[:next])"
+        sinks = ext._find_sinks(code, {1}, "auth_controller.rb")
+        assert any(s.sink_category == "redirect" for s in sinks)
+
+    def test_detects_params_source(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = "name = params[:name]"
+        sources = ext._find_sources(code, {1}, "controller.rb")
+        assert any(s.source_category == "http_param" for s in sources)
+
+    def test_safe_hash_where_not_flagged(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = "User.where(email: email)"
+        sinks = ext._find_sinks(code, {1}, "user.rb")
+        assert len(sinks) == 0
+
+
+class TestPHPSinkDetection:
+    """PHP sink and source pattern coverage."""
+
+    def _ext(self, tmp_path):
+        return CodeContextExtractor(tmp_path)
+
+    def test_detects_mysqli_query(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = 'mysqli_query($conn, "SELECT * FROM users WHERE id=" . $_GET["id"]);'
+        sinks = ext._find_sinks(code, {1}, "users.php")
+        assert any(s.sink_category == "sql_exec" for s in sinks)
+
+    def test_detects_shell_exec(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = '$output = shell_exec("ls " . $_GET["dir"]);'
+        sinks = ext._find_sinks(code, {1}, "files.php")
+        assert any(s.sink_category == "cmd_exec" for s in sinks)
+
+    def test_detects_eval(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = "eval($_POST['code']);"
+        sinks = ext._find_sinks(code, {1}, "admin.php")
+        assert any(s.sink_category == "eval_exec" for s in sinks)
+
+    def test_detects_unserialize(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = "$obj = unserialize($_COOKIE['data']);"
+        sinks = ext._find_sinks(code, {1}, "session.php")
+        assert any(s.sink_category == "deserialize" for s in sinks)
+
+    def test_detects_get_superglobal_source(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = "$name = $_GET['name'];"
+        sources = ext._find_sources(code, {1}, "index.php")
+        assert any(s.source_category == "superglobal" for s in sources)
+
+    def test_detects_post_superglobal_source(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = "$data = $_POST['payload'];"
+        sources = ext._find_sources(code, {1}, "api.php")
+        assert any(s.source_category == "superglobal" for s in sources)
+
+    def test_prepared_statement_not_flagged(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = "$stmt = $pdo->prepare('SELECT * FROM users WHERE id = ?');"
+        sinks = ext._find_sinks(code, {1}, "db.php")
+        assert len(sinks) == 0
+
+
+class TestCSharpSinkDetection:
+    """C# sink and source pattern coverage."""
+
+    def _ext(self, tmp_path):
+        return CodeContextExtractor(tmp_path)
+
+    def test_detects_sql_command(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = 'var cmd = new SqlCommand("SELECT * FROM Users WHERE Id=" + id, conn);'
+        sinks = ext._find_sinks(code, {1}, "UserRepo.cs")
+        assert any(s.sink_category == "sql_exec" for s in sinks)
+
+    def test_detects_execute_reader(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = "var reader = cmd.ExecuteReader();"
+        sinks = ext._find_sinks(code, {1}, "Db.cs")
+        assert any(s.sink_category == "sql_exec" for s in sinks)
+
+    def test_detects_process_start(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = "Process.Start(userInput);"
+        sinks = ext._find_sinks(code, {1}, "Runner.cs")
+        assert any(s.sink_category == "cmd_exec" for s in sinks)
+
+    def test_detects_response_redirect(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = "Response.Redirect(Request.QueryString[\"next\"]);"
+        sinks = ext._find_sinks(code, {1}, "Auth.cs")
+        assert any(s.sink_category == "redirect" for s in sinks)
+
+    def test_detects_html_raw_xss(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = "@Html.Raw(Model.UserInput)"
+        sinks = ext._find_sinks(code, {1}, "View.cs")
+        assert any(s.sink_category == "xss" for s in sinks)
+
+    def test_detects_xml_document_xxe(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = "var doc = new XmlDocument(); doc.Load(inputStream);"
+        sinks = ext._find_sinks(code, {1}, "Parser.cs")
+        assert any(s.sink_category == "xxe" for s in sinks)
+
+    def test_detects_request_querystring_source(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = 'var id = Request.QueryString["id"];'
+        sources = ext._find_sources(code, {1}, "Controller.cs")
+        assert any(s.source_category == "request_param" for s in sources)
+
+    def test_detects_from_query_annotation_source(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = "public IActionResult Search([FromQuery] string q) {"
+        sources = ext._find_sources(code, {1}, "ApiController.cs")
+        assert any(s.source_category == "annotation_param" for s in sources)
+
+    def test_sql_parameter_not_flagged(self, tmp_path):
+        ext = self._ext(tmp_path)
+        code = 'cmd.Parameters.AddWithValue("@id", userId);'
+        sinks = ext._find_sinks(code, {1}, "Db.cs")
+        assert len(sinks) == 0

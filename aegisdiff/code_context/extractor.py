@@ -309,6 +309,229 @@ SAFE_JAVA_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
+# ── Ruby patterns ──────────────────────────────────────────────────────────
+
+RUBY_SINK_PATTERNS: Dict[str, re.Pattern] = {
+    "sql_exec": re.compile(
+        r"\b(find_by_sql|execute|exec_query|connection\.execute"
+        r"|where\s*\(\s*[\"'][^\"']*#\{)"  # string-interpolated where()
+        r"|\bActiveRecord::Base\.connection\.(execute|query)\s*\(",
+        re.IGNORECASE,
+    ),
+    "cmd_exec": re.compile(
+        r"\b(system|exec|spawn|IO\.popen|Open3\.popen|Kernel\.system)\s*\("
+        r"|`[^`]+`"  # backtick execution
+        r"|%x\{",
+        re.IGNORECASE,
+    ),
+    "eval_exec": re.compile(
+        r"\b(eval|instance_eval|class_eval|module_eval)\s*\(",
+        re.IGNORECASE,
+    ),
+    "deserialize": re.compile(
+        r"\bMarshal\.load\s*\("
+        r"|\bYAML\.load\s*\("  # safe_load is OK; load is not
+        r"|\bERB\.new\s*\(",
+        re.IGNORECASE,
+    ),
+    "file_ops": re.compile(
+        r"\b(File\.(open|read|write|delete|rename)|IO\.read|open\s*\()\s*",
+        re.IGNORECASE,
+    ),
+    "redirect": re.compile(
+        r"\bredirect_to\s*\(",
+        re.IGNORECASE,
+    ),
+    "ssrf": re.compile(
+        r"\b(Net::HTTP\.(get|post|start)|Faraday\.new|HTTParty\.(get|post)|open-uri)\b"
+        r"|\bURI\.open\s*\(",
+        re.IGNORECASE,
+    ),
+}
+
+RUBY_SOURCE_PATTERNS: Dict[str, re.Pattern] = {
+    "http_param": re.compile(
+        r"\bparams\s*[\[:]"
+        r"|\brequest\.(params|query_string|body|env|GET|POST|headers)\b"
+        r"|\bcookies\s*\["
+        r"|\bsession\s*\[",
+        re.IGNORECASE,
+    ),
+    "env_var": re.compile(r"\bENV\s*\[", re.IGNORECASE),
+}
+
+SAFE_RUBY_PATTERNS = re.compile(
+    r"\bwhere\s*\(\s*[\w:]+\s*:"  # hash-syntax where (safe)
+    r"|\bsanitize\b|\bescape_sql\b|\bquote\s*\(",
+    re.IGNORECASE,
+)
+
+# ── PHP patterns ───────────────────────────────────────────────────────────
+
+PHP_SINK_PATTERNS: Dict[str, re.Pattern] = {
+    "sql_exec": re.compile(
+        r"\b(mysql_query|mysqli_query|pg_query|mssql_query"
+        r"|PDO::query|\$pdo\s*->\s*(query|exec|prepare)"
+        r"|\$db\s*->\s*(query|execute)"
+        r"|\$conn\s*->\s*query)\s*\(",
+        re.IGNORECASE,
+    ),
+    "cmd_exec": re.compile(
+        r"\b(exec|system|shell_exec|passthru|proc_open|popen|pcntl_exec)\s*\("
+        r"|`[^`]+`",  # backtick shell execution
+        re.IGNORECASE,
+    ),
+    "file_include": re.compile(
+        r"\b(include|require|include_once|require_once)\s*[(\s]",
+        re.IGNORECASE,
+    ),
+    "file_ops": re.compile(
+        r"\b(file_get_contents|file_put_contents|fopen|readfile|file\s*\()\s*\(",
+        re.IGNORECASE,
+    ),
+    "eval_exec": re.compile(
+        r"\beval\s*\(",
+        re.IGNORECASE,
+    ),
+    "xss": re.compile(
+        r"\b(echo|print|printf|vprintf|print_r|var_dump)\s+\$"
+        r"|\bheader\s*\(\s*[\"']Location:",
+        re.IGNORECASE,
+    ),
+    "deserialize": re.compile(
+        r"\bunserialize\s*\(",
+        re.IGNORECASE,
+    ),
+    "redirect": re.compile(
+        r"\bheader\s*\(\s*[\"']Location:",
+        re.IGNORECASE,
+    ),
+}
+
+PHP_SOURCE_PATTERNS: Dict[str, re.Pattern] = {
+    "superglobal": re.compile(
+        r"\$_(GET|POST|REQUEST|COOKIE|FILES|SERVER|SESSION)\b",
+        re.IGNORECASE,
+    ),
+    "filter_input": re.compile(
+        r"\bfilter_input\s*\(",
+        re.IGNORECASE,
+    ),
+}
+
+SAFE_PHP_PATTERNS = re.compile(
+    r"\bprepare\s*\(|\bbindParam\b|\bbindValue\b"
+    r"|\bhtmlspecialchars\s*\(|\bhtmlentities\s*\("
+    r"|\bintval\s*\(|\bfloatval\s*\(|\bstrip_tags\s*\(",
+    re.IGNORECASE,
+)
+
+PHP_SANITIZER_KEYWORDS = [
+    "htmlspecialchars",
+    "htmlentities",
+    "strip_tags",
+    "addslashes",
+    "intval",
+    "floatval",
+    "filter_var",
+    "prepared",
+    "bindParam",
+    "bindValue",
+    "escape",
+    "sanitize",
+]
+
+# ── C# patterns ────────────────────────────────────────────────────────────
+
+CSHARP_SINK_PATTERNS: Dict[str, re.Pattern] = {
+    "sql_exec": re.compile(
+        r"\b(SqlCommand|OleDbCommand|OdbcCommand|NpgsqlCommand)\s*\("
+        r"|\.(ExecuteReader|ExecuteNonQuery|ExecuteScalar|ExecuteQuery)\s*\("
+        r"|\bFromSqlRaw\s*\(|\bDatabase\.ExecuteSqlRaw\s*\(",
+        re.IGNORECASE,
+    ),
+    "cmd_exec": re.compile(
+        r"\bProcess\.Start\s*\("
+        r"|\bnew\s+ProcessStartInfo\s*\(",
+        re.IGNORECASE,
+    ),
+    "deserialize": re.compile(
+        r"\b(BinaryFormatter|NetDataContractSerializer|ObjectStateFormatter"
+        r"|LosFormatter|JavaScriptSerializer)\s*\(\s*\)\s*\.(Deserialize|Deserialize)\s*\("
+        r"|\bXmlSerializer\b.*\.Deserialize\s*\("
+        r"|\bJsonConvert\.DeserializeObject\s*\(",
+        re.IGNORECASE,
+    ),
+    "file_ops": re.compile(
+        r"\b(File\.(ReadAllText|WriteAllText|ReadAllBytes|WriteAllBytes|Open|Create|Delete)"
+        r"|new\s+FileStream\s*\("
+        r"|Path\.Combine\s*\()\s*\(",
+        re.IGNORECASE,
+    ),
+    "xss": re.compile(
+        r"\bResponse\.Write\s*\("
+        r"|\bHtml\.Raw\s*\("
+        r"|\bMvcHtmlString\.Create\s*\(",
+        re.IGNORECASE,
+    ),
+    "redirect": re.compile(
+        r"\bResponse\.Redirect\s*\("
+        r"|\breturn\s+Redirect\s*\("
+        r"|\breturn\s+RedirectToAction\s*\(",
+        re.IGNORECASE,
+    ),
+    "xxe": re.compile(
+        r"\bnew\s+XmlDocument\s*\(\s*\)"
+        r"|\bXmlReader\.Create\s*\("
+        r"|\bXDocument\.Load\s*\(",
+        re.IGNORECASE,
+    ),
+    "ssrf": re.compile(
+        r"\bnew\s+HttpClient\s*\(\s*\)"
+        r"|\bWebClient\.(DownloadString|DownloadData|OpenRead)\s*\("
+        r"|\bHttpWebRequest\.Create\s*\(",
+        re.IGNORECASE,
+    ),
+}
+
+CSHARP_SOURCE_PATTERNS: Dict[str, re.Pattern] = {
+    "request_param": re.compile(
+        r"\bRequest\.(QueryString|Form|Params|Headers|Cookies|Body|Path)\b"
+        r"|\bHttpContext\.Request\b"
+        r"|\bContext\.Request\b",
+        re.IGNORECASE,
+    ),
+    "annotation_param": re.compile(
+        r"\[From(Query|Body|Route|Header|Form|Services)\]",
+        re.IGNORECASE,
+    ),
+    "env_var": re.compile(
+        r"\bEnvironment\.GetEnvironmentVariable\s*\("
+        r"|\bConfiguration\[",
+        re.IGNORECASE,
+    ),
+}
+
+SAFE_CSHARP_PATTERNS = re.compile(
+    r"\bSqlParameter\b|\bParameters\.AddWithValue\b|\bParameters\.Add\b"
+    r"|\bHtmlEncoder\.Encode\b|\bWebUtility\.HtmlEncode\b"
+    r"|\bEntityFramework\b|\bDbContext\b",
+    re.IGNORECASE,
+)
+
+CSHARP_SANITIZER_KEYWORDS = [
+    "HtmlEncode",
+    "HtmlEncoder",
+    "WebUtility.HtmlEncode",
+    "AntiXssEncoder",
+    "SqlParameter",
+    "Parameters.Add",
+    "escape",
+    "sanitize",
+    "validate",
+    "Regex.IsMatch",
+]
+
 # ── File extension → language mapping ─────────────────────────────────────
 
 _EXT_TO_LANG: Dict[str, str] = {
@@ -322,8 +545,9 @@ _EXT_TO_LANG: Dict[str, str] = {
     ".jsx": "javascript",
     ".go": "go",
     ".java": "java",
-    ".rb": "ruby",  # uses Python patterns as closest match
-    ".php": "php",  # uses Python patterns as closest match
+    ".rb": "ruby",
+    ".php": "php",
+    ".cs": "csharp",
 }
 
 
@@ -580,7 +804,13 @@ class CodeContextExtractor:
             return (GO_SINK_PATTERNS, GO_SOURCE_PATTERNS, SAFE_GO_PATTERNS, [])
         if lang == "java":
             return (JAVA_SINK_PATTERNS, JAVA_SOURCE_PATTERNS, SAFE_JAVA_PATTERNS, [])
-        # Default: Python (also used for Ruby, PHP as best approximation)
+        if lang == "ruby":
+            return (RUBY_SINK_PATTERNS, RUBY_SOURCE_PATTERNS, SAFE_RUBY_PATTERNS, [])
+        if lang == "php":
+            return (PHP_SINK_PATTERNS, PHP_SOURCE_PATTERNS, SAFE_PHP_PATTERNS, PHP_SANITIZER_KEYWORDS)
+        if lang == "csharp":
+            return (CSHARP_SINK_PATTERNS, CSHARP_SOURCE_PATTERNS, SAFE_CSHARP_PATTERNS, CSHARP_SANITIZER_KEYWORDS)
+        # Default: Python
         return (PYTHON_SINK_PATTERNS, PYTHON_SOURCE_PATTERNS, SAFE_ORM_PATTERNS, [])
 
     def _find_sinks(
