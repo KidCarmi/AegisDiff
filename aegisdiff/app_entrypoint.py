@@ -142,11 +142,33 @@ def main() -> None:
     logger.info(
         "Fetching diff for %s#%d (installation %d)", target_repo, pr_number, installation_id
     )
-    raw_diff = app_client.get_pr_diff(installation_id, owner, repo_name, pr_number)
+    installation_token = app_client.get_installation_token(installation_id)
+    raw_diff = app_client.get_pr_diff(installation_id, owner, repo_name, pr_number, token=installation_token)
 
     if not raw_diff.strip():
         logger.info("Empty diff — nothing to analyze")
         sys.exit(0)
+
+    # ── Fetch full file content for changed files ─────────────────────────────
+    # The GitHub App path has no checked-out repo, so the extractor can't read
+    # files from disk. We fetch each changed file's content via the Contents API
+    # and pass it as a cache so the extractor has full file context (not just diff).
+    import re as _re
+    changed_file_paths = _re.findall(r"^\+\+\+ b/(.+)$", raw_diff, _re.MULTILINE)
+    file_cache: dict = {}
+    for fp in changed_file_paths:
+        content = app_client.get_file_content(
+            token=installation_token,
+            owner=owner,
+            repo=repo_name,
+            path=fp,
+            ref=commit_sha,
+        )
+        if content is not None:
+            file_cache[fp] = content
+            logger.info("Fetched full file context: %s (%d chars)", fp, len(content))
+        else:
+            logger.debug("Could not fetch content for %s — diff-only analysis", fp)
 
     # ── Build providers ───────────────────────────────────────────────────────
     # Cerebras excluded: GitHub Actions (Azure IPs) are blocked by Cerebras WAF.
@@ -174,7 +196,7 @@ def main() -> None:
         sys.exit(1)
 
     orchestrator = LLMOrchestrator(providers, max_retries_per_provider=3)
-    engine = TriageEngine(orchestrator, repo_root=Path("."))
+    engine = TriageEngine(orchestrator, repo_root=Path("."), file_cache=file_cache)
 
     # ── Analyze ───────────────────────────────────────────────────────────────
     t0 = time.monotonic()

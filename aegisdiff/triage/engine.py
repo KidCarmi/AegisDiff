@@ -6,7 +6,7 @@ import logging
 import re
 import time
 from pathlib import Path
-from typing import List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from ..code_context.extractor import CodeContextExtractor
 from ..llm.orchestrator import LLMOrchestrator
@@ -49,10 +49,12 @@ class TriageEngine:
         orchestrator: LLMOrchestrator,
         repo_root: Path,
         language: str = "python",
+        file_cache: Optional[Dict[str, str]] = None,
     ) -> None:
         self._orchestrator = orchestrator
         self._repo_root = repo_root
         self._language = language
+        self._file_cache = file_cache or {}
 
     def analyze_diff(self, raw_diff: str) -> Verdict:
         """
@@ -69,7 +71,7 @@ class TriageEngine:
             return Verdict.no_op()
 
         try:
-            extractor = CodeContextExtractor(self._repo_root, self._language)
+            extractor = CodeContextExtractor(self._repo_root, self._language, self._file_cache)
             context = extractor.extract_from_diff(raw_diff)
 
             if not context.raw_diff_snippet.strip():

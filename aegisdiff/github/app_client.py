@@ -83,12 +83,17 @@ class GitHubAppClient:
         owner: str,
         repo: str,
         pr_number: int,
+        token: Optional[str] = None,
     ) -> str:
         """
         Fetch the unified diff for a pull request using the installation token.
         Returns the raw diff text.
+
+        Pass `token` to reuse an already-minted installation token and avoid
+        a redundant API call.
         """
-        token = self.get_installation_token(installation_id)
+        if token is None:
+            token = self.get_installation_token(installation_id)
         resp = httpx.get(
             f"{self.BASE_URL}/repos/{owner}/{repo}/pulls/{pr_number}",
             headers={
@@ -100,6 +105,48 @@ class GitHubAppClient:
         )
         resp.raise_for_status()
         return resp.text
+
+    # ── File content ─────────────────────────────────────────────────────────
+
+    def get_file_content(
+        self, token: str, owner: str, repo: str, path: str, ref: str
+    ) -> Optional[str]:
+        """
+        Fetch the raw text of a file at a specific ref via GitHub Contents API.
+
+        Returns None on any error (file too large, binary, directory, 404).
+        Transparently decodes base64 — GitHub always returns content in base64.
+        """
+        import base64
+
+        try:
+            resp = httpx.get(
+                f"{self.BASE_URL}/repos/{owner}/{repo}/contents/{path}",
+                headers={"Authorization": f"Bearer {token}", "Accept": self.ACCEPT},
+                params={"ref": ref},
+                timeout=15.0,
+            )
+        except httpx.HTTPError as exc:
+            logger.warning("Cannot fetch %s@%s: %s", path, ref[:7], exc)
+            return None
+
+        if not resp.is_success:
+            logger.debug("Cannot fetch %s@%s: HTTP %d", path, ref[:7], resp.status_code)
+            return None
+
+        data = resp.json()
+        if isinstance(data, list):
+            return None  # directory listing — skip
+
+        encoding = data.get("encoding", "")
+        raw = data.get("content", "")
+        if encoding == "base64":
+            try:
+                return base64.b64decode(raw).decode("utf-8", errors="replace")
+            except Exception as exc:
+                logger.debug("base64 decode failed for %s: %s", path, exc)
+                return None
+        return None
 
     # ── Inline review comment ─────────────────────────────────────────────────
 

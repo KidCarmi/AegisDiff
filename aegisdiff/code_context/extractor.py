@@ -329,11 +329,19 @@ class CodeContextExtractor:
     Args:
         repo_root: Path to the root of the checked-out repository.
         language: Primary programming language to parse (default: "python").
+        file_cache: Optional dict mapping file paths to their full text content.
+                    Used when the repo is not checked out (e.g. GitHub App path).
     """
 
-    def __init__(self, repo_root: Path, language: str = "python") -> None:
+    def __init__(
+        self,
+        repo_root: Path,
+        language: str = "python",
+        file_cache: Optional[Dict[str, str]] = None,
+    ) -> None:
         self._repo_root = repo_root
         self._language = language
+        self._file_cache = file_cache or {}
         self._ts_parser = self._load_tree_sitter(language)
 
     # ------------------------------------------------------------------
@@ -346,16 +354,9 @@ class CodeContextExtractor:
         all_paths: List[DataFlowPath] = []
 
         for file_path, line_ranges in changed_lines.items():
-            abs_path = self._repo_root / file_path
-            if not abs_path.exists() or not abs_path.is_file():
-                logger.debug("Skipping non-existent file: %s", file_path)
+            source_code = self._read_file(file_path)
+            if source_code is None:
                 continue
-            try:
-                source_code = abs_path.read_text(errors="replace")
-            except OSError as e:
-                logger.warning("Cannot read %s: %s", file_path, e)
-                continue
-
             paths = self._extract_paths(source_code, line_ranges, file_path)
             all_paths.extend(paths)
 
@@ -369,6 +370,28 @@ class CodeContextExtractor:
             raw_diff_snippet=snippet,
             supporting_context=context,
         )
+
+    # ------------------------------------------------------------------
+    # File reading (disk-first, cache fallback)
+    # ------------------------------------------------------------------
+
+    def _read_file(self, file_path: str) -> Optional[str]:
+        """
+        Return the text of file_path, trying the checked-out repo first,
+        then the file_cache (populated by the GitHub App path from the
+        GitHub Contents API).  Returns None if unavailable.
+        """
+        abs_path = self._repo_root / file_path
+        if abs_path.exists() and abs_path.is_file():
+            try:
+                return abs_path.read_text(errors="replace")
+            except OSError as exc:
+                logger.warning("Cannot read %s from disk: %s", file_path, exc)
+        if file_path in self._file_cache:
+            logger.debug("Using cached content for %s", file_path)
+            return self._file_cache[file_path]
+        logger.debug("File not available (not on disk, not in cache): %s", file_path)
+        return None
 
     # ------------------------------------------------------------------
     # Diff parsing
@@ -647,21 +670,19 @@ class CodeContextExtractor:
     def _extract_surrounding_context(
         self,
         changed_lines: Dict[str, List[range]],
-        max_lines_per_file: int = 30,
+        max_lines_per_file: int = 120,
     ) -> str:
         contexts: List[str] = []
         for file_path, line_ranges in changed_lines.items():
-            abs_path = self._repo_root / file_path
-            if not abs_path.exists():
+            source_code = self._read_file(file_path)
+            if source_code is None:
                 continue
-            try:
-                all_lines = abs_path.read_text(errors="replace").splitlines()
-            except OSError:
-                continue
+            all_lines = source_code.splitlines()
             context_line_set: Set[int] = set()
             for r in line_ranges:
                 for ln in r:
-                    for offset in range(-5, 6):
+                    # ±25 lines around each changed line (was ±5)
+                    for offset in range(-25, 26):
                         context_line_set.add(ln + offset)
             relevant = sorted(context_line_set & set(range(1, len(all_lines) + 1)))[
                 :max_lines_per_file
