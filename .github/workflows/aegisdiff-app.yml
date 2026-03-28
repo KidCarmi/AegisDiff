@@ -50,6 +50,7 @@ jobs:
           CEREBRAS_API_KEY_3:      ${{ secrets.CEREBRAS_API_KEY_3 }}
           OPENROUTER_API_KEY:      ${{ secrets.OPENROUTER_API_KEY }}
           OPENROUTER_API_KEY_2:    ${{ secrets.OPENROUTER_API_KEY_2 }}
+          OPENROUTER_API_KEY_3:    ${{ secrets.OPENROUTER_API_KEY_3 }}
 
           # Target PR context (passed from webhook via client_payload)
           INSTALLATION_ID: ${{ github.event.client_payload.installation_id }}

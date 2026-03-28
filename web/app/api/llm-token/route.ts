@@ -85,6 +85,7 @@ export async function GET(req: NextRequest) {
   const openrouterKeys = [
     process.env.PLATFORM_OPENROUTER_API_KEY,
     process.env.PLATFORM_OPENROUTER_API_KEY_2,
+    process.env.PLATFORM_OPENROUTER_API_KEY_3,
   ].filter(Boolean) as string[];
 
   const hasAnyKey = cerebrasKeys.length > 0 || openrouterKeys.length > 0;

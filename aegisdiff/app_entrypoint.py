@@ -127,6 +127,7 @@ def main() -> None:
         for k in [
             os.environ.get("OPENROUTER_API_KEY", ""),
             os.environ.get("OPENROUTER_API_KEY_2", ""),
+            os.environ.get("OPENROUTER_API_KEY_3", ""),
         ]
         if k
     ]

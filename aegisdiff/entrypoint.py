@@ -177,7 +177,9 @@ def main() -> None:
 
     cfg = load_config()
 
-    openrouter_keys = [k for k in [cfg.openrouter_api_key, cfg.openrouter_api_key_2] if k]
+    openrouter_keys = [
+        k for k in [cfg.openrouter_api_key, cfg.openrouter_api_key_2, cfg.openrouter_api_key_3] if k
+    ]
 
     # ── Build provider list ────────────────────────────────────────────────
     # Priority: OpenRouter llama-3.3-70b:free → OpenRouter llama-4-maverick:free

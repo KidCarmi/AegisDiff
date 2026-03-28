@@ -80,6 +80,7 @@ jobs:
           CEREBRAS_API_KEY_3:   ${{ secrets.CEREBRAS_API_KEY_3 }}
           OPENROUTER_API_KEY:   ${{ secrets.OPENROUTER_API_KEY }}
           OPENROUTER_API_KEY_2: ${{ secrets.OPENROUTER_API_KEY_2 }}
+          OPENROUTER_API_KEY_3: ${{ secrets.OPENROUTER_API_KEY_3 }}
           COMMIT_SHA:           ${{ github.sha }}
           REPO:                 ${{ github.repository }}
           DIFF_PATH:            tests/fixtures/sample.diff
@@ -162,6 +163,7 @@ jobs:
           CEREBRAS_API_KEY_3:    ${{ secrets.CEREBRAS_API_KEY_3 }}
           OPENROUTER_API_KEY:    ${{ secrets.OPENROUTER_API_KEY }}
           OPENROUTER_API_KEY_2:  ${{ secrets.OPENROUTER_API_KEY_2 }}
+          OPENROUTER_API_KEY_3:  ${{ secrets.OPENROUTER_API_KEY_3 }}
           GITHUB_TOKEN:          ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER:             ${{ github.event.pull_request.number || '' }}
           COMMIT_SHA:            ${{ github.sha }}
