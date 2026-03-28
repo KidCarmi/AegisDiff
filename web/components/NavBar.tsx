@@ -3,6 +3,7 @@
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import Image from "next/image";
+import icon from "../public/icon-192.png";
 
 const NAV_LINKS = [
   { href: "/dashboard", label: "Dashboard" },
@@ -60,6 +61,7 @@ function ThemeToggle() {
 
 export function NavBar({ isAdmin = false }: { isAdmin?: boolean }) {
   const path = usePathname();
+  if (path === "/login") return null;
   const [maybeNewScans, setMaybeNewScans] = useState(false);
 
   useEffect(() => {
@@ -85,7 +87,7 @@ export function NavBar({ isAdmin = false }: { isAdmin?: boolean }) {
           href="/dashboard"
           className="flex items-center gap-2 font-bold hover:opacity-80 transition-opacity"
         >
-          <Image src="/icon-192.png" alt="" width={28} height={28} className="rounded-md ring-1 ring-brand-blue/40" priority />
+          <Image src={icon} alt="" width={28} height={28} className="rounded-md ring-1 ring-brand-blue/40" priority />
           <span className="text-xl text-brand-blue">AegisDiff</span>
         </a>
 
