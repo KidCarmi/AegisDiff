@@ -80,5 +80,7 @@ export async function GET(_req: NextRequest) {
     users: userStats[0],
     rateLimitedRepos: rateLimited,
     recentAudit,
+  }, {
+    headers: { "Cache-Control": "private, max-age=60, stale-while-revalidate=120" },
   });
 }

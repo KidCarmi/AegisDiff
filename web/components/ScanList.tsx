@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { ScanCard } from "./ScanCard";
 import type { Scan, VerdictType } from "../lib/types";
 
@@ -32,11 +32,13 @@ export function ScanList({ scans, canFeedback = false }: { scans: Scan[]; canFee
     });
   }, [scans, filter, search]);
 
-  const counts = {
-    TRUE_POSITIVE: scans.filter((s) => s.verdict === "TRUE_POSITIVE").length,
-    NEEDS_REVIEW: scans.filter((s) => s.verdict === "NEEDS_REVIEW").length,
-    FALSE_POSITIVE: scans.filter((s) => s.verdict === "FALSE_POSITIVE").length,
-  };
+  const counts = useMemo(() => {
+    const c = { TRUE_POSITIVE: 0, NEEDS_REVIEW: 0, FALSE_POSITIVE: 0 };
+    for (const s of scans) {
+      if (s.verdict in c) c[s.verdict as keyof typeof c]++;
+    }
+    return c;
+  }, [scans]);
 
   return (
     <div>

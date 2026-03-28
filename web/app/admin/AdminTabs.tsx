@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -348,10 +349,12 @@ function UsersTab() {
               >
                 <td className="px-5 py-2">
                   <div className="flex items-center gap-2">
-                    <img
-                      src={`https://github.com/${u.username}.png?size=24`}
+                    <Image
+                      src={`https://avatars.githubusercontent.com/${u.username}?size=48`}
                       alt={u.username}
-                      className="h-6 w-6 rounded-full"
+                      width={24}
+                      height={24}
+                      className="rounded-full"
                     />
                     <div>
                       <a

@@ -78,5 +78,7 @@ export async function GET(req: NextRequest) {
     `;
   }
 
-  return NextResponse.json({ scans: rows });
+  return NextResponse.json({ scans: rows }, {
+    headers: { "Cache-Control": "private, max-age=30, stale-while-revalidate=60" },
+  });
 }

@@ -30,6 +30,12 @@ const nextConfig = {
     serverComponentsExternalPackages: ["@neondatabase/serverless"],
     instrumentationHook: true,
   },
+  images: {
+    remotePatterns: [
+      { protocol: "https", hostname: "avatars.githubusercontent.com" },
+    ],
+    formats: ["image/webp", "image/avif"],
+  },
   async headers() {
     return [
       {

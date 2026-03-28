@@ -70,7 +70,7 @@ export async function GET(
   return new NextResponse(svg, {
     headers: {
       "Content-Type": "image/svg+xml",
-      "Cache-Control": "no-cache, max-age=0",
+      "Cache-Control": "public, max-age=300, stale-while-revalidate=600",
     },
   });
 }

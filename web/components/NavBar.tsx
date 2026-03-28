@@ -2,6 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import Image from "next/image";
 
 const NAV_LINKS = [
   { href: "/dashboard", label: "Dashboard" },
@@ -84,7 +85,7 @@ export function NavBar({ isAdmin = false }: { isAdmin?: boolean }) {
           href="/dashboard"
           className="flex items-center gap-2 font-bold hover:opacity-80 transition-opacity"
         >
-          <img src="/icon-192.png" alt="" className="h-7 w-7 rounded-md ring-1 ring-brand-blue/40" />
+          <Image src="/icon-192.png" alt="" width={28} height={28} className="rounded-md ring-1 ring-brand-blue/40" priority />
           <span className="text-xl text-brand-blue">AegisDiff</span>
         </a>
 

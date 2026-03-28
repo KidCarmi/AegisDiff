@@ -95,5 +95,7 @@ export async function GET(req: NextRequest) {
     breaches,
     total: breaches.length,
     sla_days: slaDays,
+  }, {
+    headers: { "Cache-Control": "private, max-age=60, stale-while-revalidate=120" },
   });
 }

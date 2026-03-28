@@ -38,18 +38,17 @@ export async function GET(req: NextRequest) {
     LIMIT 200
   `;
 
-  // Filter app-installed repos to only those the signed-in user can see
-  const accessible: any[] = [];
-  for (const row of appRows as any[]) {
-    const resp = await fetch(
-      `https://api.github.com/repos/${row.owner}/${row.name}`,
-      {
+  // Filter app-installed repos to only those the signed-in user can see.
+  // All GitHub API checks run in parallel instead of sequentially.
+  const accessChecks = await Promise.all(
+    (appRows as any[]).map((row) =>
+      fetch(`https://api.github.com/repos/${row.owner}/${row.name}`, {
         headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/vnd.github+json" },
-        cache: "no-store",
-      }
-    );
-    if (resp.ok) accessible.push(row);
-  }
+        next: { revalidate: 60 },
+      }).then((r) => r.ok)
+    )
+  );
+  const accessible = (appRows as any[]).filter((_, i) => accessChecks[i]);
 
   // Merge, deduplicate by owner/name (owned rows take precedence)
   const seen = new Set<string>();

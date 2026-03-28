@@ -64,5 +64,7 @@ export async function GET(req: NextRequest) {
     LIMIT 15
   `;
 
-  return NextResponse.json({ vulns: rows });
+  return NextResponse.json({ vulns: rows }, {
+    headers: { "Cache-Control": "private, max-age=60, stale-while-revalidate=120" },
+  });
 }
