@@ -64,6 +64,7 @@ async function triggerAnalysis(
     return;
   }
 
+  console.log(`[webhook] Dispatching to ${engineRepo} (token prefix: ${engineToken.slice(0, 8)}...)`);
   const resp = await fetch(`https://api.github.com/repos/${engineRepo}/dispatches`, {
     method: "POST",
     headers: {
