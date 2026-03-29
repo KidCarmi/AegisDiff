@@ -144,7 +144,7 @@ class LLMOrchestrator:
                             and exc.response.status_code == 429
                         ):
                             logger.warning(
-                                "Rate limit (429) from %s — cooling down %.0fs, rotating to next provider",
+                                "Rate limit (429) from %s — cooling down %.0fs, rotating",
                                 provider.name,
                                 _RATE_LIMIT_COOLDOWN,
                             )
