@@ -250,7 +250,10 @@ function OverviewTab({
                   ? `${e.repo_owner}/${e.repo_name}`
                   : "—"}
               </span>
-              <span className="ml-auto shrink-0 text-xs text-gray-400 dark:text-gray-500">
+              <span
+                className="ml-auto shrink-0 text-xs text-gray-400 dark:text-gray-500"
+                suppressHydrationWarning
+              >
                 {new Date(e.created_at).toLocaleString()}
               </span>
             </div>
@@ -385,12 +388,12 @@ function UsersTab() {
                     {u.has_custom_limit && <span className="ml-1 text-[10px] opacity-70">custom</span>}
                   </span>
                 </td>
-                <td className="px-5 py-2 text-xs text-gray-500 dark:text-gray-400">
+                <td className="px-5 py-2 text-xs text-gray-500 dark:text-gray-400" suppressHydrationWarning>
                   {u.last_scan_at
                     ? new Date(u.last_scan_at).toLocaleDateString()
                     : "—"}
                 </td>
-                <td className="px-5 py-2 text-xs text-gray-500 dark:text-gray-400">
+                <td className="px-5 py-2 text-xs text-gray-500 dark:text-gray-400" suppressHydrationWarning>
                   {new Date(u.created_at).toLocaleDateString()}
                 </td>
               </tr>
@@ -744,7 +747,7 @@ function FailuresTab({
                   <td className="px-5 py-2.5 text-right font-semibold text-orange-600 dark:text-orange-400">
                     {r.count}
                   </td>
-                  <td className="px-5 py-2.5 text-right text-xs text-gray-400 dark:text-gray-500">
+                  <td className="px-5 py-2.5 text-right text-xs text-gray-400 dark:text-gray-500" suppressHydrationWarning>
                     {new Date(r.last_seen).toLocaleDateString()}
                   </td>
                 </tr>

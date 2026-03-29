@@ -16,8 +16,12 @@ export const authOptions: NextAuthOptions = {
       clientSecret: process.env.GITHUB_CLIENT_SECRET!,
       authorization: {
         params: {
-          // Request read access to repos for RBAC verification
-          scope: "read:user user:email repo workflow",
+          // Minimum scopes needed:
+          //   read:user   — GitHub ID + login for session
+          //   user:email  — email for welcome notification
+          //   read:org    — org membership check for RBAC (org:owner role)
+          //   repo        — collaborator permission check requires this on private repos
+          scope: "read:user user:email read:org repo",
         },
       },
     }),
