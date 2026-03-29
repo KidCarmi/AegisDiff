@@ -28,7 +28,7 @@ BACKOFF_JITTER = 0.3
 
 
 _RATE_LIMIT_COOLDOWN = 65.0  # seconds to skip a provider after 429
-_TIMEOUT_COOLDOWN = 30.0     # seconds to skip a provider after a read timeout
+_TIMEOUT_COOLDOWN = 30.0  # seconds to skip a provider after a read timeout
 
 
 class LLMOrchestrator:
