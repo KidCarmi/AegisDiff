@@ -60,10 +60,13 @@ jobs:
 
       - name: Run end-user integration test
         env:
-          # The one required secret — a real PAT that triggers webhook/workflows
-          INTEGRATION_PAT:  ${{ secrets.INTEGRATION_PAT }}
-          # Which repo to open the test PR on (defaults to this repo)
-          GITHUB_REPOSITORY: ${{ github.repository }}
+          # Required secrets
+          INTEGRATION_PAT:       ${{ secrets.INTEGRATION_PAT }}
+          # A user repo connected to the AegisDiff dashboard — NOT this repo.
+          # Example: KidCarmi/aegisdiff-integration-target
+          INTEGRATION_TEST_REPO: ${{ secrets.INTEGRATION_TEST_REPO }}
+          # Used by the preflight check to detect mis-configuration
+          GITHUB_REPOSITORY:     ${{ github.repository }}
 
           # Optional: Vercel dashboard read-back verification
           INTEGRATION_DASHBOARD_URL: ${{ secrets.INTEGRATION_DASHBOARD_URL }}
