@@ -7,12 +7,17 @@ name: Integration Test — Real PR Scan
 # One-time setup required:
 #   1. Create a dedicated test repo, e.g. KidCarmi/aegisdiff-integration-target
 #   2. Install the AegisDiff GitHub App on that repo (Settings → Integrations)
-#   3. Add these secrets to THIS repo (KidCarmi/AegisDiff):
+#   3. Connect the test repo in the AegisDiff dashboard, copy its ingest token
+#   4. Create a v1 API key: curl https://your-app.vercel.app/api/v1/key (authed)
+#   5. Add these secrets to THIS repo (KidCarmi/AegisDiff):
 #        INTEGRATION_TEST_GITHUB_TOKEN   PAT with `repo` scope on the test repo
 #        INTEGRATION_TEST_REPO           "owner/name" of the test repo
 #        INTEGRATION_INSTALLATION_ID     GitHub App installation ID for the test repo
-#   The other secrets (GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, etc.) are
-#   already present from the production setup.
+#        INTEGRATION_INGEST_TOKEN        Per-repo ingest token from the dashboard
+#        INTEGRATION_DASHBOARD_URL       https://your-app.vercel.app
+#        INTEGRATION_API_KEY             v1 API key for GET /api/v1/scans read-back
+#   The other secrets (GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, AEGISDIFF_INGEST_URL)
+#   are already present from the production setup.
 
 on:
   # Run every Monday at 08:00 UTC alongside the weekly digest
@@ -82,9 +87,14 @@ jobs:
           GROQ_API_KEY_3:       ${{ secrets.GROQ_API_KEY_3 }}
           # GITHUB_TOKEN is auto-injected by Actions as zero-config LLM fallback
 
-          # ── Dashboard ingest verification (optional) ──────────────────────
-          AEGISDIFF_INGEST_URL:   ${{ secrets.AEGISDIFF_INGEST_URL }}
-          AEGISDIFF_INGEST_TOKEN: ${{ secrets.INTEGRATION_INGEST_TOKEN }}
+          # ── Vercel dashboard — real ingest + read-back verification ─────────
+          # AEGISDIFF_INGEST_URL and AEGISDIFF_INGEST_TOKEN send real data to Vercel.
+          # INTEGRATION_DASHBOARD_URL + INTEGRATION_API_KEY read it back via
+          # GET /api/v1/scans to confirm the scan reached the Neon DB.
+          AEGISDIFF_INGEST_URL:        ${{ secrets.AEGISDIFF_INGEST_URL }}
+          AEGISDIFF_INGEST_TOKEN:      ${{ secrets.INTEGRATION_INGEST_TOKEN }}
+          INTEGRATION_DASHBOARD_URL:   ${{ secrets.INTEGRATION_DASHBOARD_URL }}
+          INTEGRATION_API_KEY:         ${{ secrets.INTEGRATION_API_KEY }}
 
           # ── Sentry (optional) ─────────────────────────────────────────────
           SENTRY_DSN:         ${{ secrets.SENTRY_DSN }}
