@@ -27,6 +27,10 @@ BACKOFF_MAX = 60.0
 BACKOFF_JITTER = 0.3
 
 
+_RATE_LIMIT_COOLDOWN = 65.0  # seconds to skip a provider after 429
+_TIMEOUT_COOLDOWN = 30.0     # seconds to skip a provider after a read timeout
+
+
 class LLMOrchestrator:
     """
     Manages a priority-ordered list of LLM providers with automatic failover.
@@ -35,6 +39,9 @@ class LLMOrchestrator:
 
         orchestrator = LLMOrchestrator([GeminiProvider(key), GroqProvider(key)])
         response = orchestrator.complete(request)
+
+    Cooldown tracking is persistent across complete() calls so that providers
+    which 429'd on chunk N are skipped on chunk N+1 without re-probing them.
     """
 
     def __init__(
@@ -46,20 +53,49 @@ class LLMOrchestrator:
             raise ValueError("At least one LLM provider must be supplied.")
         self._providers = providers
         self._max_retries = max_retries_per_provider
+        # Maps provider id() → monotonic timestamp when cooldown expires.
+        # Survives across complete() calls (chunked analysis).
+        self._cooldown_until: dict[int, float] = {}
+
+    def _in_cooldown(self, provider: LLMProvider) -> bool:
+        return time.monotonic() < self._cooldown_until.get(id(provider), 0.0)
+
+    def _set_cooldown(self, provider: LLMProvider, seconds: float) -> None:
+        self._cooldown_until[id(provider)] = time.monotonic() + seconds
+        logger.debug("Provider %s cooling down for %.0fs", provider.name, seconds)
 
     def complete(self, request: LLMRequest) -> LLMResponse:
         last_exc: Optional[Exception] = None
 
-        # Two outer passes: first try all providers, then (if all rate-limited)
-        # sleep once and try the whole list again before giving up.
+        # Two outer passes: first try all non-cooled-down providers; then (if
+        # every provider is still cooling down) sleep until the soonest expiry
+        # and try the whole list once more before giving up.
         for full_pass in range(2):
             if full_pass == 1:
-                logger.warning(
-                    "All providers rate-limited — sleeping 30s before retrying full list"
+                # Find the soonest cooldown expiry and sleep until then (max 65s).
+                now = time.monotonic()
+                soonest = min(
+                    (exp for exp in self._cooldown_until.values() if exp > now),
+                    default=now,
                 )
-                time.sleep(30.0)
+                wait = min(soonest - now + 0.5, 65.0)
+                if wait > 1.0:
+                    logger.warning(
+                        "All providers cooling down — sleeping %.0fs before retrying",
+                        wait,
+                    )
+                    time.sleep(wait)
 
             for provider in self._providers:
+                if self._in_cooldown(provider):
+                    remaining = self._cooldown_until[id(provider)] - time.monotonic()
+                    logger.debug(
+                        "Skipping %s — cooling down for %.0fs more",
+                        provider.name,
+                        remaining,
+                    )
+                    continue
+
                 # context_scale tracks adaptive trimming: halved on every 413 response
                 context_scale = 1.0
 
@@ -101,17 +137,31 @@ class LLMOrchestrator:
                             time.sleep(2.0)  # brief pause before retry
                             continue  # retry same provider with smaller context
 
-                        # 429 = rate limited: rotate immediately, don't waste time
-                        # sleeping on a key that won't recover for ~60s.
+                        # 429 = rate limited: mark cooldown and rotate immediately.
+                        # Don't waste time sleeping on a key that won't recover for ~60s.
                         if (
                             isinstance(exc, httpx.HTTPStatusError)
                             and exc.response.status_code == 429
                         ):
                             logger.warning(
-                                "Rate limit (429) from %s — rotating to next provider",
+                                "Rate limit (429) from %s — cooling down %.0fs, rotating to next provider",
                                 provider.name,
+                                _RATE_LIMIT_COOLDOWN,
                             )
+                            self._set_cooldown(provider, _RATE_LIMIT_COOLDOWN)
                             break  # skip remaining retries for this provider
+
+                        # Timeout: the provider accepted the connection but never
+                        # responded. Cool down briefly so subsequent chunks don't
+                        # repeat the 30s wait on the same hung endpoint.
+                        if isinstance(exc, httpx.TimeoutException):
+                            logger.warning(
+                                "Timeout from %s — cooling down %.0fs, rotating to next provider",
+                                provider.name,
+                                _TIMEOUT_COOLDOWN,
+                            )
+                            self._set_cooldown(provider, _TIMEOUT_COOLDOWN)
+                            break
 
                         if not provider.is_retryable_error(exc):
                             logger.warning(

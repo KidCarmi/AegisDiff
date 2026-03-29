@@ -61,7 +61,7 @@ class OpenRouterProvider(LLMProvider):
             OPENROUTER_API_URL,
             json=payload,
             headers=headers,
-            timeout=60.0,
+            timeout=30.0,
         )
         if not resp.is_success:
             try:

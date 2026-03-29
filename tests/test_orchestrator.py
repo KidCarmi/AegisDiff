@@ -70,21 +70,76 @@ class TestOrchestratorSuccess:
 
 class TestOrchestratorRetry:
     def test_retries_on_retryable_error_then_succeeds(self):
-        provider = make_mock_provider("gemini")
+        """Non-429 retryable errors (e.g. 503) are retried within the same provider."""
+        provider = make_mock_provider("openrouter")
         provider.is_retryable_error.return_value = True
         provider.complete.side_effect = [
             httpx.HTTPStatusError(
-                "429", request=MagicMock(), response=MagicMock(status_code=429)
+                "503", request=MagicMock(), response=MagicMock(status_code=503)
             ),
-            make_response("gemini"),
+            make_response("openrouter"),
         ]
 
         orch = LLMOrchestrator([provider], max_retries_per_provider=3)
         with patch("aegisdiff.llm.orchestrator.time.sleep"):
             resp = orch.complete(SAMPLE_REQUEST)
 
-        assert resp.provider == "gemini"
+        assert resp.provider == "openrouter"
         assert provider.complete.call_count == 2
+
+    def test_429_sets_cooldown_skips_provider_on_second_pass(self):
+        """429 puts the provider in cooldown; it is NOT retried even on the second pass."""
+        provider = make_mock_provider("openrouter")
+        provider.is_retryable_error.return_value = True
+        provider.complete.side_effect = httpx.HTTPStatusError(
+            "429", request=MagicMock(), response=MagicMock(status_code=429)
+        )
+
+        orch = LLMOrchestrator([provider], max_retries_per_provider=3)
+        with patch("aegisdiff.llm.orchestrator.time.sleep"):
+            with pytest.raises(RuntimeError, match="All LLM providers exhausted"):
+                orch.complete(SAMPLE_REQUEST)
+
+        # Provider called exactly once — cooldown prevents any retries
+        assert provider.complete.call_count == 1
+
+    def test_429_fails_over_to_next_provider(self):
+        """429 on provider 1 immediately fails over to provider 2 without retries."""
+        p1 = make_mock_provider("openrouter")
+        p1.is_retryable_error.return_value = True
+        p1.complete.side_effect = httpx.HTTPStatusError(
+            "429", request=MagicMock(), response=MagicMock(status_code=429)
+        )
+
+        p2 = make_mock_provider("groq")
+        p2.is_retryable_error.return_value = False
+        p2.complete.return_value = make_response("groq")
+
+        orch = LLMOrchestrator([p1, p2], max_retries_per_provider=3)
+        with patch("aegisdiff.llm.orchestrator.time.sleep"):
+            resp = orch.complete(SAMPLE_REQUEST)
+
+        assert resp.provider == "groq"
+        assert p1.complete.call_count == 1   # tried once, then cooled down
+        assert p2.complete.call_count == 1   # got the request immediately
+
+    def test_timeout_sets_short_cooldown(self):
+        """ReadTimeout on provider 1 sets a short cooldown and fails over to provider 2."""
+        p1 = make_mock_provider("openrouter")
+        p1.is_retryable_error.return_value = True
+        p1.complete.side_effect = httpx.ReadTimeout("timed out", request=MagicMock())
+
+        p2 = make_mock_provider("groq")
+        p2.is_retryable_error.return_value = False
+        p2.complete.return_value = make_response("groq")
+
+        orch = LLMOrchestrator([p1, p2], max_retries_per_provider=3)
+        with patch("aegisdiff.llm.orchestrator.time.sleep"):
+            resp = orch.complete(SAMPLE_REQUEST)
+
+        assert resp.provider == "groq"
+        # p1 tried once then cooldown, not retried
+        assert p1.complete.call_count == 1
 
     def test_exhausts_all_providers_raises_runtime_error(self):
         primary = make_mock_provider("gemini")
