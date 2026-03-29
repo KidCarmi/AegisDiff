@@ -1,0 +1,113 @@
+name: Integration Test — Real PR Scan
+
+# Verifies the full AegisDiff pipeline against a live GitHub PR:
+#   Create branch → push vulnerable code → open PR → run engine →
+#   verify PR comment + commit status + dashboard ingest
+#
+# One-time setup required:
+#   1. Create a dedicated test repo, e.g. KidCarmi/aegisdiff-integration-target
+#   2. Install the AegisDiff GitHub App on that repo (Settings → Integrations)
+#   3. Add these secrets to THIS repo (KidCarmi/AegisDiff):
+#        INTEGRATION_TEST_GITHUB_TOKEN   PAT with `repo` scope on the test repo
+#        INTEGRATION_TEST_REPO           "owner/name" of the test repo
+#        INTEGRATION_INSTALLATION_ID     GitHub App installation ID for the test repo
+#   The other secrets (GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, etc.) are
+#   already present from the production setup.
+
+on:
+  # Run every Monday at 08:00 UTC alongside the weekly digest
+  schedule:
+    - cron: "0 8 * * 1"
+
+  # Allow manual trigger from the Actions tab
+  workflow_dispatch:
+    inputs:
+      verbose:
+        description: "Show full pytest output (-s flag)"
+        type: boolean
+        default: true
+
+  # Also run when changes to the engine or this workflow are pushed
+  push:
+    paths:
+      - "aegisdiff/**"
+      - ".github/workflows/integration-test.yml"
+      - "tests/test_integration_real_github.py"
+    branches:
+      - main
+      - master
+      - "claude/**"
+
+permissions:
+  contents: read
+  id-token: write   # OIDC for platform key fetch
+  models: read      # GitHub Models API (zero-config LLM fallback)
+
+jobs:
+  integration-test:
+    name: Live PR Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15  # real LLM calls can take up to 60s each
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install --quiet -e ".[dev]" "PyJWT[cryptography]"
+
+      - name: Run integration test
+        env:
+          # ── Test repo credentials ──────────────────────────────────────────
+          INTEGRATION_TEST_GITHUB_TOKEN: ${{ secrets.INTEGRATION_TEST_GITHUB_TOKEN }}
+          INTEGRATION_TEST_REPO:         ${{ secrets.INTEGRATION_TEST_REPO }}
+          INTEGRATION_INSTALLATION_ID:   ${{ secrets.INTEGRATION_INSTALLATION_ID }}
+
+          # ── GitHub App credentials (already in our secrets) ───────────────
+          GITHUB_APP_ID:          ${{ secrets.GITHUB_APP_ID }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.GITHUB_APP_PRIVATE_KEY }}
+
+          # ── LLM providers — use production keys so the test uses the real stack ─
+          OPENROUTER_API_KEY:   ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_API_KEY_2: ${{ secrets.OPENROUTER_API_KEY_2 }}
+          OPENROUTER_API_KEY_3: ${{ secrets.OPENROUTER_API_KEY_3 }}
+          GROQ_API_KEY:         ${{ secrets.GROQ_API_KEY }}
+          GROQ_API_KEY_2:       ${{ secrets.GROQ_API_KEY_2 }}
+          GROQ_API_KEY_3:       ${{ secrets.GROQ_API_KEY_3 }}
+          # GITHUB_TOKEN is auto-injected by Actions as zero-config LLM fallback
+
+          # ── Dashboard ingest verification (optional) ──────────────────────
+          AEGISDIFF_INGEST_URL:   ${{ secrets.AEGISDIFF_INGEST_URL }}
+          AEGISDIFF_INGEST_TOKEN: ${{ secrets.INTEGRATION_INGEST_TOKEN }}
+
+          # ── Sentry (optional) ─────────────────────────────────────────────
+          SENTRY_DSN:         ${{ secrets.SENTRY_DSN }}
+          SENTRY_ENVIRONMENT: integration-test
+
+        run: |
+          FLAGS="-v"
+          if [ "${{ github.event.inputs.verbose }}" = "true" ] || [ "${{ github.event_name }}" = "schedule" ]; then
+            FLAGS="-v -s"
+          fi
+          python -m pytest tests/test_integration_real_github.py $FLAGS \
+            --timeout=600 \
+            --tb=short \
+            --no-header \
+            -p no:cov
+
+      - name: Write step summary
+        if: always()
+        run: |
+          echo "## Integration Test Result" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Item | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Test repo | \`${{ secrets.INTEGRATION_TEST_REPO }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Triggered by | ${{ github.event_name }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Commit | \`${{ github.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
