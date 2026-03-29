@@ -2,20 +2,24 @@ name: Integration Test — End-User PR Scan
 
 # Smoke test that verifies AegisDiff works exactly as a real user experiences it.
 #
-# ZERO secrets required — GITHUB_TOKEN and GITHUB_REPOSITORY are injected
-# automatically by GitHub Actions into every run. No setup needed.
+# Requires ONE secret (Settings → Secrets → Actions):
+#   INTEGRATION_PAT  — a GitHub PAT with `repo` scope on this repo
+#
+# Why a PAT and not GITHUB_TOKEN?
+#   GitHub blocks GITHUB_TOKEN (the bot) from triggering other workflow runs
+#   on the same repo. Opening a PR with a real PAT fires the webhook normally,
+#   which triggers aegisdiff-app.yml exactly as a real user's PR would.
 #
 # Flow:
-#   1. Opens a real PR with vulnerable code on this repo
+#   1. Opens a real PR with vulnerable code on this repo (KidCarmi/AegisDiff)
 #   2. Waits for AegisDiff to scan it automatically
 #      (webhook → Vercel → repository_dispatch → aegisdiff-app.yml → engine)
 #   3. Verifies the PR comment and commit status appeared
 #   4. Closes the PR and deletes the test branch
 #
 # Optional — to also verify the Vercel dashboard stored the scan:
-#   Add these 2 secrets once (Settings → Secrets → Actions):
-#     INTEGRATION_DASHBOARD_URL  — https://your-app.vercel.app
-#     INTEGRATION_API_KEY        — v1 REST API key (from GET /api/v1/key)
+#   INTEGRATION_DASHBOARD_URL  — https://your-app.vercel.app
+#   INTEGRATION_API_KEY        — v1 REST API key (from GET /api/v1/key)
 
 on:
   schedule:
@@ -32,9 +36,7 @@ on:
       - "claude/**"
 
 permissions:
-  contents: write       # create test branch + file
-  pull-requests: write  # open and close the test PR
-  statuses: read        # read commit statuses to verify AegisDiff posted one
+  contents: read   # checkout only — the PAT handles all GitHub API writes
 
 jobs:
   end-user-scan:
@@ -58,8 +60,9 @@ jobs:
 
       - name: Run end-user integration test
         env:
-          # Auto-injected by GitHub Actions — no secrets to add
-          GITHUB_TOKEN:      ${{ secrets.GITHUB_TOKEN }}
+          # The one required secret — a real PAT that triggers webhook/workflows
+          INTEGRATION_PAT:  ${{ secrets.INTEGRATION_PAT }}
+          # Which repo to open the test PR on (defaults to this repo)
           GITHUB_REPOSITORY: ${{ github.repository }}
 
           # Optional: Vercel dashboard read-back verification

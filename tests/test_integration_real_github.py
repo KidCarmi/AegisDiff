@@ -1,17 +1,26 @@
 """
 End-user smoke test — AegisDiff as a real user experiences it.
 
-Zero secrets required. Uses the GITHUB_TOKEN that GitHub Actions injects
-automatically into every workflow run.
+Requires ONE secret: INTEGRATION_PAT
+  A GitHub Personal Access Token with `repo` scope on this repo.
+  Add it once: Settings → Secrets → Actions → New repository secret.
+
+Why a PAT and not GITHUB_TOKEN?
+  GitHub Actions intentionally blocks GITHUB_TOKEN (the bot token) from
+  triggering other workflow runs on the same repo (anti-loop protection).
+  Opening a PR with a real PAT fires the webhook → Vercel → aegisdiff-app.yml
+  exactly as a real user's PR would.
 
 Flow (identical to what a real user sees):
-  1. Open a PR with vulnerable code on this repo (KidCarmi/AegisDiff)
+  1. Open a PR with vulnerable code on this repo
   2. Watch for AegisDiff to scan it automatically
      (webhook → Vercel → repository_dispatch → aegisdiff-app.yml → engine)
   3. Verify the PR comment and commit status appeared
   4. Optionally verify the scan is stored in the Vercel dashboard
 
-No tokens to add. No setup. Just works.
+Optional dashboard verification (2 more secrets):
+  INTEGRATION_DASHBOARD_URL  — https://your-app.vercel.app
+  INTEGRATION_API_KEY        — v1 REST API key
 """
 
 from __future__ import annotations
@@ -26,32 +35,35 @@ import httpx
 import pytest
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Config — everything comes from what GitHub Actions already injects
+# Config
 # ─────────────────────────────────────────────────────────────────────────────
 
-# GITHUB_TOKEN is injected automatically by every GitHub Actions run.
-# GITHUB_REPOSITORY is the current repo, e.g. "KidCarmi/AegisDiff".
-GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
-TEST_REPO = os.environ.get("GITHUB_REPOSITORY", "")  # auto-injected by Actions
+# The one required secret — a PAT that can open PRs and trigger workflows.
+# GITHUB_TOKEN (bot) cannot trigger other workflows; a real PAT can.
+PAT = os.environ.get("INTEGRATION_PAT", "")
 
-# Optional — enables read-back verification from the Vercel dashboard.
-# Add these two secrets once if you want dashboard verification:
+# Which repo to open the test PR on. Defaults to the current repo.
+TEST_REPO = os.environ.get("INTEGRATION_TEST_REPO",
+                           os.environ.get("GITHUB_REPOSITORY", ""))
+
+# Optional dashboard verification
 DASHBOARD_URL = os.environ.get("INTEGRATION_DASHBOARD_URL", "").rstrip("/")
 DASHBOARD_API_KEY = os.environ.get("INTEGRATION_API_KEY", "")
 
 GITHUB_API = "https://api.github.com"
-SCAN_TIMEOUT = 8 * 60   # 8 minutes — time for webhook → Actions → engine
-POLL_INTERVAL = 15      # seconds between checks
+SCAN_TIMEOUT = 8 * 60
+POLL_INTERVAL = 15
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Skip when not running inside GitHub Actions (no token / no repo)
+# Skip when the PAT is not available
 # ─────────────────────────────────────────────────────────────────────────────
 
 pytestmark = pytest.mark.skipif(
-    not (GITHUB_TOKEN and TEST_REPO),
+    not (PAT and TEST_REPO),
     reason=(
-        "End-user integration test only runs inside GitHub Actions "
-        "(needs GITHUB_TOKEN + GITHUB_REPOSITORY, both auto-injected by Actions)."
+        "Integration test skipped — set INTEGRATION_PAT (a GitHub PAT with "
+        "`repo` scope) to run this test. GITHUB_TOKEN cannot be used because "
+        "it does not trigger other workflow runs."
     ),
 )
 
@@ -89,7 +101,7 @@ def get_report(query: str) -> str:
 class GitHub:
     def __init__(self, token: str, repo: str) -> None:
         self._h = {
-            "Authorization": f"Bearer {token}",
+            "Authorization": f"token {token}",
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
         }
@@ -229,7 +241,7 @@ class TestEndUserPRScan:
     def _lifecycle(self):
         suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
         self.branch = f"aegisdiff-e2e-{suffix}"
-        self.gh = GitHub(GITHUB_TOKEN, TEST_REPO)
+        self.gh = GitHub(PAT, TEST_REPO)
         self.db = Dashboard(DASHBOARD_URL, DASHBOARD_API_KEY)
         self.pr_number: Optional[int] = None
         yield
