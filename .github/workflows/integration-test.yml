@@ -1,39 +1,26 @@
 name: Integration Test — End-User PR Scan
 
-# Smoke test that verifies AegisDiff works exactly as a real user experiences it:
+# Smoke test that verifies AegisDiff works exactly as a real user experiences it.
 #
-#   1. Opens a real PR with vulnerable code on a connected test repo
+# ZERO secrets required — GITHUB_TOKEN and GITHUB_REPOSITORY are injected
+# automatically by GitHub Actions into every run. No setup needed.
+#
+# Flow:
+#   1. Opens a real PR with vulnerable code on this repo
 #   2. Waits for AegisDiff to scan it automatically
 #      (webhook → Vercel → repository_dispatch → aegisdiff-app.yml → engine)
-#   3. Verifies the PR comment + commit status appeared on GitHub
-#   4. Optionally verifies the scan is stored in the Vercel dashboard
+#   3. Verifies the PR comment and commit status appeared
+#   4. Closes the PR and deletes the test branch
 #
-# The test runner never calls the engine directly.
-# It just acts like a developer who opened a PR and is watching their screen.
-#
-# ── One-time setup (5 minutes) ──────────────────────────────────────────────
-#
-#   1. Create a test repo, e.g. KidCarmi/aegisdiff-integration-target
-#   2. Sign in to the AegisDiff dashboard → connect that repo
-#      (this installs the GitHub App + registers the webhook automatically)
-#   3. Add 2 required secrets to KidCarmi/AegisDiff:
-#
-#      INTEGRATION_TEST_GITHUB_TOKEN  — GitHub PAT with `repo` scope on the test repo
-#      INTEGRATION_TEST_REPO          — "owner/name" of the test repo
-#
-#   Optional — to also verify the dashboard stored the scan:
-#      INTEGRATION_DASHBOARD_URL      — https://your-app.vercel.app
-#      INTEGRATION_API_KEY            — v1 REST API key (from GET /api/v1/key)
+# Optional — to also verify the Vercel dashboard stored the scan:
+#   Add these 2 secrets once (Settings → Secrets → Actions):
+#     INTEGRATION_DASHBOARD_URL  — https://your-app.vercel.app
+#     INTEGRATION_API_KEY        — v1 REST API key (from GET /api/v1/key)
 
 on:
-  # Weekly canary — every Monday at 08:00 UTC
   schedule:
-    - cron: "0 8 * * 1"
-
-  # Manual trigger from the Actions tab
-  workflow_dispatch:
-
-  # Run when the engine or this workflow changes
+    - cron: "0 8 * * 1"   # weekly canary — Monday 08:00 UTC
+  workflow_dispatch:       # manual run from Actions tab
   push:
     paths:
       - "aegisdiff/**"
@@ -45,13 +32,15 @@ on:
       - "claude/**"
 
 permissions:
-  contents: read   # checkout only — no engine credentials needed
+  contents: write       # create test branch + file
+  pull-requests: write  # open and close the test PR
+  statuses: read        # read commit statuses to verify AegisDiff posted one
 
 jobs:
   end-user-scan:
     name: End-User PR Scan
     runs-on: ubuntu-latest
-    timeout-minutes: 20   # 8-min scan timeout + buffer
+    timeout-minutes: 20   # 8-min scan wait + buffer
 
     steps:
       - name: Checkout
@@ -64,25 +53,28 @@ jobs:
           cache: "pip"
 
       - name: Install test dependencies
+        # Only needs httpx and pytest — no coverage tooling required here.
         run: pip install --quiet httpx pytest pytest-timeout
 
       - name: Run end-user integration test
         env:
-          # Required — the only two secrets needed
-          INTEGRATION_TEST_GITHUB_TOKEN: ${{ secrets.INTEGRATION_TEST_GITHUB_TOKEN }}
-          INTEGRATION_TEST_REPO:         ${{ secrets.INTEGRATION_TEST_REPO }}
+          # Auto-injected by GitHub Actions — no secrets to add
+          GITHUB_TOKEN:      ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
 
-          # Optional — enables Vercel dashboard read-back verification
-          INTEGRATION_DASHBOARD_URL:     ${{ secrets.INTEGRATION_DASHBOARD_URL }}
-          INTEGRATION_API_KEY:           ${{ secrets.INTEGRATION_API_KEY }}
+          # Optional: Vercel dashboard read-back verification
+          INTEGRATION_DASHBOARD_URL: ${{ secrets.INTEGRATION_DASHBOARD_URL }}
+          INTEGRATION_API_KEY:       ${{ secrets.INTEGRATION_API_KEY }}
 
+        # --override-ini clears the --cov addopts from pyproject.toml
+        # so pytest-cov is not required in this lightweight install
         run: |
           python -m pytest tests/test_integration_real_github.py \
             -v -s \
             --timeout=600 \
             --tb=short \
             --no-header \
-            -p no:cov
+            --override-ini="addopts="
 
       - name: Write step summary
         if: always()
@@ -91,6 +83,6 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| | |" >> "$GITHUB_STEP_SUMMARY"
           echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Test repo | \`${{ secrets.INTEGRATION_TEST_REPO }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Repo | \`${{ github.repository }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Triggered by | ${{ github.event_name }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Dashboard check | ${{ secrets.INTEGRATION_DASHBOARD_URL != '' && '✓ enabled' || 'skipped' }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Dashboard check | ${{ secrets.INTEGRATION_DASHBOARD_URL != '' && '✓ enabled' || 'skipped (no secret set)' }} |" >> "$GITHUB_STEP_SUMMARY"

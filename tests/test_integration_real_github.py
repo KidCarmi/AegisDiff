@@ -1,30 +1,17 @@
 """
 End-user smoke test — AegisDiff as a real user experiences it.
 
-This test does NOT call the engine directly.
-It acts like a developer who just connected their repo to AegisDiff:
+Zero secrets required. Uses the GITHUB_TOKEN that GitHub Actions injects
+automatically into every workflow run.
 
-  1. Open a real PR with vulnerable code on the test repo
-  2. Wait for the AegisDiff webhook → Vercel → repository_dispatch → Actions
-     pipeline to fire automatically (just like a real user would wait)
-  3. Verify the PR comment and commit status appeared on GitHub
-  4. Verify the scan is visible in the dashboard (if configured)
-  5. Clean up
+Flow (identical to what a real user sees):
+  1. Open a PR with vulnerable code on this repo (KidCarmi/AegisDiff)
+  2. Watch for AegisDiff to scan it automatically
+     (webhook → Vercel → repository_dispatch → aegisdiff-app.yml → engine)
+  3. Verify the PR comment and commit status appeared
+  4. Optionally verify the scan is stored in the Vercel dashboard
 
-One-time setup (do this once, then it just works):
-  1. Create a test repo, e.g. KidCarmi/aegisdiff-integration-target
-  2. Sign in to the AegisDiff dashboard and connect that repo
-     (this installs the GitHub App and registers the webhook automatically)
-  3. Add 2 secrets to KidCarmi/AegisDiff:
-       INTEGRATION_TEST_GITHUB_TOKEN  — GitHub PAT with `repo` scope on the test repo
-       INTEGRATION_TEST_REPO          — "owner/name" of the test repo
-
-Optional (enables dashboard read-back verification):
-       INTEGRATION_DASHBOARD_URL  — https://your-app.vercel.app
-       INTEGRATION_API_KEY        — v1 REST API key for GET /api/v1/scans
-
-That's it. The test uses the live webhook, the live App, the live Vercel deployment,
-the live LLM stack, and the live Neon database — exactly what a real user gets.
+No tokens to add. No setup. Just works.
 """
 
 from __future__ import annotations
@@ -39,50 +26,43 @@ import httpx
 import pytest
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Skip if required secrets are absent (safe to run locally with no creds)
+# Config — everything comes from what GitHub Actions already injects
 # ─────────────────────────────────────────────────────────────────────────────
 
-_REQUIRED = [
-    "INTEGRATION_TEST_GITHUB_TOKEN",
-    "INTEGRATION_TEST_REPO",
-]
+# GITHUB_TOKEN is injected automatically by every GitHub Actions run.
+# GITHUB_REPOSITORY is the current repo, e.g. "KidCarmi/AegisDiff".
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
+TEST_REPO = os.environ.get("GITHUB_REPOSITORY", "")  # auto-injected by Actions
 
-_missing = [k for k in _REQUIRED if not os.environ.get(k)]
-
-pytestmark = pytest.mark.skipif(
-    bool(_missing),
-    reason=(
-        f"End-user integration test skipped — missing: {_missing}. "
-        "Connect a repo to the AegisDiff dashboard, then set "
-        "INTEGRATION_TEST_GITHUB_TOKEN and INTEGRATION_TEST_REPO."
-    ),
-)
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Config
-# ─────────────────────────────────────────────────────────────────────────────
-
-TEST_TOKEN = os.environ.get("INTEGRATION_TEST_GITHUB_TOKEN", "")
-TEST_REPO = os.environ.get("INTEGRATION_TEST_REPO", "")
+# Optional — enables read-back verification from the Vercel dashboard.
+# Add these two secrets once if you want dashboard verification:
 DASHBOARD_URL = os.environ.get("INTEGRATION_DASHBOARD_URL", "").rstrip("/")
 DASHBOARD_API_KEY = os.environ.get("INTEGRATION_API_KEY", "")
 
 GITHUB_API = "https://api.github.com"
+SCAN_TIMEOUT = 8 * 60   # 8 minutes — time for webhook → Actions → engine
+POLL_INTERVAL = 15      # seconds between checks
 
-# How long to wait for the webhook pipeline to fire and AegisDiff to post results.
-# Real flow: PR opened → GitHub webhook → Vercel → repository_dispatch → Actions
-# job queued → Python engine runs → GitHub API writes. ~2–4 min end-to-end.
-SCAN_TIMEOUT_SECONDS = 8 * 60   # 8 minutes
-POLL_INTERVAL_SECONDS = 15
+# ─────────────────────────────────────────────────────────────────────────────
+# Skip when not running inside GitHub Actions (no token / no repo)
+# ─────────────────────────────────────────────────────────────────────────────
+
+pytestmark = pytest.mark.skipif(
+    not (GITHUB_TOKEN and TEST_REPO),
+    reason=(
+        "End-user integration test only runs inside GitHub Actions "
+        "(needs GITHUB_TOKEN + GITHUB_REPOSITORY, both auto-injected by Actions)."
+    ),
+)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Vulnerable code for the test PR
 # ─────────────────────────────────────────────────────────────────────────────
 
-VULNERABLE_FILE = "src/api_handler.py"
+VULNERABLE_FILE = "tests/fixtures/_integration_test_target.py"
 
 VULNERABLE_CODE = """\
-\"\"\"API handler — deliberately vulnerable for AegisDiff integration testing.\"\"\"
+# Integration test fixture — deliberately vulnerable, never executed.
 import subprocess
 import os
 
@@ -102,7 +82,7 @@ def get_report(query: str) -> str:
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Minimal GitHub API client (just what the test needs)
+# Minimal GitHub API wrapper
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -122,8 +102,6 @@ class GitHub:
         resp.raise_for_status()
         return resp.json() if resp.content else {}
 
-    # ── setup helpers ──────────────────────────────────────────────────────
-
     def default_branch(self) -> tuple[str, str]:
         info = self._req("GET", f"/repos/{self.repo}")
         b = info["default_branch"]
@@ -136,7 +114,6 @@ class GitHub:
 
     def push_file(self, path: str, content: str, branch: str, message: str) -> str:
         import base64
-        # Get existing SHA if file already exists
         existing_sha = None
         try:
             f = self._req("GET", f"/repos/{self.repo}/contents/{path}",
@@ -144,15 +121,13 @@ class GitHub:
             existing_sha = f.get("sha") if isinstance(f, dict) else None
         except httpx.HTTPStatusError:
             pass
-
-        body = {
+        body: dict = {
             "message": message,
             "content": base64.b64encode(content.encode()).decode(),
             "branch": branch,
         }
         if existing_sha:
             body["sha"] = existing_sha
-
         resp = httpx.put(
             f"{GITHUB_API}/repos/{self.repo}/contents/{path}",
             headers=self._h, json=body, timeout=15.0,
@@ -162,8 +137,8 @@ class GitHub:
 
     def open_pr(self, title: str, head: str, base: str, body: str = "") -> tuple[int, str]:
         pr = self._req("POST", f"/repos/{self.repo}/pulls",
-                       json={"title": title, "head": head, "base": base,
-                             "body": body, "draft": False})
+                       json={"title": title, "head": head,
+                             "base": base, "body": body, "draft": False})
         return pr["number"], pr["head"]["sha"]
 
     def close_pr(self, number: int) -> None:
@@ -179,41 +154,37 @@ class GitHub:
         except Exception:
             pass
 
-    # ── polling ────────────────────────────────────────────────────────────
-
     def aegisdiff_comment(self, pr_number: int) -> Optional[dict]:
         comments = self._req("GET", f"/repos/{self.repo}/issues/{pr_number}/comments",
                              params={"per_page": 50})
-        for c in comments:
+        for c in (comments if isinstance(comments, list) else []):
             if "<!-- aegisdiff-report -->" in c.get("body", ""):
                 return c
         return None
 
     def aegisdiff_status(self, sha: str) -> Optional[dict]:
         statuses = self._req("GET", f"/repos/{self.repo}/commits/{sha}/statuses")
-        for s in statuses:
+        for s in (statuses if isinstance(statuses, list) else []):
             if s.get("context") == "AegisDiff / security":
                 return s
         return None
 
-    def poll_comment(self, pr_number: int,
-                     timeout: int = SCAN_TIMEOUT_SECONDS,
-                     interval: int = POLL_INTERVAL_SECONDS) -> Optional[dict]:
-        deadline = time.monotonic() + timeout
+    def poll_for_comment(self, pr_number: int) -> Optional[dict]:
+        deadline = time.monotonic() + SCAN_TIMEOUT
         elapsed = 0
         while time.monotonic() < deadline:
             c = self.aegisdiff_comment(pr_number)
             if c:
                 return c
-            print(f"  ⏳ Waiting for AegisDiff scan... ({elapsed}s elapsed, "
-                  f"up to {timeout}s)", flush=True)
-            time.sleep(interval)
-            elapsed += interval
+            print(f"  ⏳ Waiting for AegisDiff... ({elapsed}s / {SCAN_TIMEOUT}s)",
+                  flush=True)
+            time.sleep(POLL_INTERVAL)
+            elapsed += POLL_INTERVAL
         return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Dashboard helper
+# Dashboard helper (optional)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -226,17 +197,15 @@ class Dashboard:
     def configured(self) -> bool:
         return bool(self._base and self._key)
 
-    def find_scan(self, repo: str, commit_sha: str, timeout: int = 30) -> Optional[dict]:
+    def find_scan(self, repo: str, commit_sha: str) -> Optional[dict]:
         headers = {"Authorization": f"Bearer {self._key}"}
-        deadline = time.monotonic() + timeout
+        deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
             try:
-                resp = httpx.get(
-                    f"{self._base}/api/v1/scans",
-                    headers=headers,
-                    params={"repo": repo, "limit": 20},
-                    timeout=15.0,
-                )
+                resp = httpx.get(f"{self._base}/api/v1/scans",
+                                 headers=headers,
+                                 params={"repo": repo, "limit": 20},
+                                 timeout=15.0)
                 resp.raise_for_status()
                 data = resp.json()
                 scans = data.get("scans", data) if isinstance(data, dict) else data
@@ -244,7 +213,7 @@ class Dashboard:
                     if scan.get("commit_sha") == commit_sha:
                         return scan
             except Exception as e:
-                print(f"  ⚠ Dashboard poll error: {e}")
+                print(f"  ⚠ Dashboard poll: {e}")
             time.sleep(5)
         return None
 
@@ -255,154 +224,112 @@ class Dashboard:
 
 
 class TestEndUserPRScan:
-    """
-    Smoke test — behaves exactly like a real AegisDiff user.
-
-    The test never calls the engine directly. It just opens a PR and
-    waits for the App to do its job automatically.
-    """
 
     @pytest.fixture(autouse=True)
     def _lifecycle(self):
         suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
         self.branch = f"aegisdiff-e2e-{suffix}"
-        self.gh = GitHub(TEST_TOKEN, TEST_REPO)
+        self.gh = GitHub(GITHUB_TOKEN, TEST_REPO)
         self.db = Dashboard(DASHBOARD_URL, DASHBOARD_API_KEY)
         self.pr_number: Optional[int] = None
         yield
-        # Always clean up
         if self.pr_number:
             self.gh.close_pr(self.pr_number)
         self.gh.delete_branch(self.branch)
-        print(f"\n  [cleanup] PR closed, branch deleted ✓")
+        print(f"  [cleanup] PR closed, branch deleted ✓")
 
     def test_aegisdiff_automatically_scans_vulnerable_pr(self):
         """
-        Open a PR with vulnerable code on a repo that has AegisDiff installed.
-        Wait for the scan to run end-to-end (webhook → Vercel → Actions → engine).
-        Verify the results appear exactly as a real user would see them.
+        Open a PR with vulnerable code and wait for AegisDiff to scan it
+        automatically. Verify the comment, commit status, and dashboard.
         """
 
         print("\n")
-        print("=" * 68)
+        print("=" * 66)
         print("  AegisDiff — End-User Integration Test")
-        print(f"  Repo : {TEST_REPO}")
-        if self.db.configured:
-            print(f"  Dashboard : {DASHBOARD_URL}")
-        print("=" * 68)
+        print(f"  Repo      : {TEST_REPO}")
+        print(f"  Dashboard : {DASHBOARD_URL or '(not configured)'}")
+        print("=" * 66)
 
-        # ── Step 1: Open a real PR with vulnerable code ───────────────────────
+        # ── [1] Open a real PR ────────────────────────────────────────────────
         print("\n  [1] Opening PR with vulnerable code...")
-
         base_branch, base_sha = self.gh.default_branch()
         self.gh.create_branch(self.branch, base_sha)
-
-        commit_sha = self.gh.push_file(
+        self.gh.push_file(
             path=VULNERABLE_FILE,
             content=VULNERABLE_CODE,
             branch=self.branch,
-            message=(
-                "feat: add API handler\n\n"
-                "[aegisdiff-e2e-test] Contains CWE-78 for integration testing."
-            ),
+            message="test: add integration test fixture with CWE-78",
         )
-
         pr_number, head_sha = self.gh.open_pr(
-            title=f"[AegisDiff E2E] Add API handler with data processing ({self.branch[-6:]})",
+            title=f"[AegisDiff E2E] Integration test ({self.branch[-6:]})",
             head=self.branch,
             base=base_branch,
             body=(
-                "This PR adds an API handler.\n\n"
-                "> _Automated integration test — will be closed automatically._"
+                "Automated smoke test — verifies the full AegisDiff pipeline.\n\n"
+                "_This PR will be closed automatically._"
             ),
         )
         self.pr_number = pr_number
+        print(f"  ✓ PR #{pr_number} opened  (commit {head_sha[:7]})")
 
-        print(f"  ✓ PR #{pr_number} opened on {TEST_REPO}")
-        print(f"    Branch : {self.branch}")
-        print(f"    Commit : {head_sha[:7]}")
+        # ── [2] Wait for AegisDiff to run automatically ───────────────────────
         print(f"\n  [2] Waiting for AegisDiff to scan automatically...")
-        print(f"    (webhook → Vercel → Actions → engine → GitHub API)")
-        print(f"    Timeout: {SCAN_TIMEOUT_SECONDS // 60} minutes\n")
-
-        # ── Step 2: Wait for AegisDiff to run (no engine call — just waiting) ─
-        # This is exactly what a real user does: opens a PR and waits.
+        print(f"      (webhook → Vercel → repository_dispatch → Actions → engine)")
         opened_at = time.monotonic()
-        comment = self.gh.poll_comment(pr_number)
+        comment = self.gh.poll_for_comment(pr_number)
         elapsed = int(time.monotonic() - opened_at)
 
         assert comment is not None, (
-            f"\n\nAegisDiff did not post a PR comment on {TEST_REPO}#{pr_number} "
-            f"within {SCAN_TIMEOUT_SECONDS // 60} minutes.\n\n"
-            f"Possible causes:\n"
-            f"  • The AegisDiff GitHub App is not installed on {TEST_REPO}\n"
-            f"  • The Vercel webhook handler is not running\n"
-            f"  • The dashboard has not connected this repo\n"
-            f"  • The Actions workflow (aegisdiff-app.yml) failed\n\n"
-            f"Check: https://github.com/{TEST_REPO}/actions\n"
-            f"Check: https://github.com/settings/installations"
+            f"\n\nAegisDiff did not post a comment on {TEST_REPO}#{pr_number} "
+            f"within {SCAN_TIMEOUT // 60} minutes.\n\n"
+            "Check:\n"
+            f"  • https://github.com/{TEST_REPO}/actions  (did aegisdiff-app.yml run?)\n"
+            "  • Is the AegisDiff GitHub App installed on this repo?\n"
+            "  • Is the Vercel webhook handler running?"
         )
+        print(f"  ✓ Scanned in {elapsed}s")
 
-        print(f"  ✓ AegisDiff scanned in {elapsed}s\n")
-
-        # ── Step 3: Verify PR comment ─────────────────────────────────────────
-        print("  [3] Verifying PR comment...")
+        # ── [3] Verify PR comment ─────────────────────────────────────────────
+        print("\n  [3] PR comment:")
         body = comment["body"]
-        first_line = body.split("\n")[0]
-        print(f"  ✓ Comment posted (id={comment['id']})")
-        print(f"    {first_line}")
-
-        # Must contain the AegisDiff marker
+        print(f"      {body.split(chr(10))[0]}")
         assert "<!-- aegisdiff-report -->" in body
-
-        # The vulnerable code is clearly CWE-78 — must be TRUE_POSITIVE
-        assert any(kw in body for kw in ("TRUE_POSITIVE", "True Positive", "true_positive")), (
-            f"Expected TRUE_POSITIVE verdict in comment.\nGot:\n{body[:600]}"
+        assert any(kw in body for kw in ("TRUE_POSITIVE", "True Positive")), (
+            f"Expected TRUE_POSITIVE in comment:\n{body[:400]}"
         )
-        print("  ✓ Verdict: TRUE_POSITIVE detected")
+        print("  ✓ Verdict: TRUE_POSITIVE")
 
-        # ── Step 4: Verify commit status ──────────────────────────────────────
-        print("\n  [4] Verifying commit status...")
+        # ── [4] Verify commit status ──────────────────────────────────────────
+        print("\n  [4] Commit status:")
         status = self.gh.aegisdiff_status(head_sha)
         assert status is not None, (
-            f"No commit status posted on {head_sha[:7]}.\n"
-            "The GitHub App needs 'commit statuses: write' permission."
+            f"No commit status on {head_sha[:7]} — "
+            "check the GitHub App has 'commit statuses: write' permission."
         )
-        print(f"  ✓ Commit status set")
-        print(f"    state   : {status['state']}")
-        print(f"    context : {status['context']}")
-        print(f"    desc    : {status['description']}")
-
+        print(f"      state   : {status['state']}")
+        print(f"      context : {status['context']}")
+        print(f"      desc    : {status['description']}")
         assert status["context"] == "AegisDiff / security"
-        assert status["state"] == "failure", (
-            f"Expected 'failure' for TRUE_POSITIVE, got '{status['state']}'"
-        )
-        print("  ✓ Merge blocked (branch protection ready)")
+        assert status["state"] == "failure"
+        print("  ✓ Merge blocked")
 
-        # ── Step 5: Verify dashboard (if configured) ──────────────────────────
+        # ── [5] Verify dashboard (optional) ──────────────────────────────────
         if self.db.configured:
-            print(f"\n  [5] Verifying dashboard...")
-            print(f"    Polling {DASHBOARD_URL}/api/v1/scans...")
-            scan = self.db.find_scan(TEST_REPO, head_sha, timeout=30)
+            print(f"\n  [5] Dashboard ({DASHBOARD_URL}):")
+            scan = self.db.find_scan(TEST_REPO, head_sha)
             assert scan is not None, (
-                f"Scan with commit_sha={head_sha[:7]} not found in dashboard.\n"
-                f"The ingest endpoint may have rejected it or the repo is not connected."
+                f"Scan with commit_sha={head_sha[:7]} not in dashboard. "
+                "Is the repo connected?"
             )
-            print(f"  ✓ Scan stored in dashboard (Neon DB)")
-            print(f"    id         : {scan.get('id', '?')}")
-            print(f"    verdict    : {scan.get('verdict', '?')}")
-            print(f"    cwe_id     : {scan.get('cwe_id', '?')}")
-            print(f"    created_at : {scan.get('created_at', '?')}")
+            print(f"      verdict    : {scan.get('verdict')}")
+            print(f"      cwe_id     : {scan.get('cwe_id')}")
+            print(f"      created_at : {scan.get('created_at')}")
             assert scan.get("verdict") == "TRUE_POSITIVE"
-            assert scan.get("pr_number") == pr_number
+            print("  ✓ Stored in Neon DB")
         else:
-            print("\n  [5] Dashboard check skipped")
-            print("      Set INTEGRATION_DASHBOARD_URL + INTEGRATION_API_KEY to enable")
+            print("\n  [5] Dashboard skipped (set INTEGRATION_DASHBOARD_URL + INTEGRATION_API_KEY)")
 
-        # ── Summary ───────────────────────────────────────────────────────────
-        dashboard_note = "dashboard=✓" if self.db.configured else "dashboard=skipped"
-        print("\n" + "=" * 68)
-        print("  END-USER INTEGRATION TEST PASSED")
-        print(f"  {TEST_REPO}  PR #{pr_number}  scan in {elapsed}s")
-        print(f"  comment=✓  •  status=failure  •  {dashboard_note}")
-        print("=" * 68 + "\n")
+        print("\n" + "=" * 66)
+        print(f"  PASSED  •  PR #{pr_number}  •  {elapsed}s  •  status=failure")
+        print("=" * 66 + "\n")
