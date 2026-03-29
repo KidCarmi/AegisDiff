@@ -302,7 +302,10 @@ class TestEndUserPRScan:
             path=VULNERABLE_FILE,
             content=VULNERABLE_CODE,
             branch=self.branch,
-            message="test: add integration test fixture with CWE-78",
+            # [skip ci] prevents repo-level CI workflows (lint, tests, security
+            # scans) from running on the test PR — AegisDiff still scans via
+            # its webhook which is not affected by [skip ci].
+            message="test: add integration test fixture with CWE-78 [skip ci]",
         )
         pr_number, head_sha = self.gh.open_pr(
             title=f"[AegisDiff E2E] Integration test ({self.branch[-6:]})",
