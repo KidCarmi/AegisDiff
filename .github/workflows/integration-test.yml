@@ -1,38 +1,39 @@
-name: Integration Test — Real PR Scan
+name: Integration Test — End-User PR Scan
 
-# Verifies the full AegisDiff pipeline against a live GitHub PR:
-#   Create branch → push vulnerable code → open PR → run engine →
-#   verify PR comment + commit status + dashboard ingest
+# Smoke test that verifies AegisDiff works exactly as a real user experiences it:
 #
-# One-time setup required:
-#   1. Create a dedicated test repo, e.g. KidCarmi/aegisdiff-integration-target
-#   2. Install the AegisDiff GitHub App on that repo (Settings → Integrations)
-#   3. Connect the test repo in the AegisDiff dashboard, copy its ingest token
-#   4. Create a v1 API key: curl https://your-app.vercel.app/api/v1/key (authed)
-#   5. Add these secrets to THIS repo (KidCarmi/AegisDiff):
-#        INTEGRATION_TEST_GITHUB_TOKEN   PAT with `repo` scope on the test repo
-#        INTEGRATION_TEST_REPO           "owner/name" of the test repo
-#        INTEGRATION_INSTALLATION_ID     GitHub App installation ID for the test repo
-#        INTEGRATION_INGEST_TOKEN        Per-repo ingest token from the dashboard
-#        INTEGRATION_DASHBOARD_URL       https://your-app.vercel.app
-#        INTEGRATION_API_KEY             v1 API key for GET /api/v1/scans read-back
-#   The other secrets (GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, AEGISDIFF_INGEST_URL)
-#   are already present from the production setup.
+#   1. Opens a real PR with vulnerable code on a connected test repo
+#   2. Waits for AegisDiff to scan it automatically
+#      (webhook → Vercel → repository_dispatch → aegisdiff-app.yml → engine)
+#   3. Verifies the PR comment + commit status appeared on GitHub
+#   4. Optionally verifies the scan is stored in the Vercel dashboard
+#
+# The test runner never calls the engine directly.
+# It just acts like a developer who opened a PR and is watching their screen.
+#
+# ── One-time setup (5 minutes) ──────────────────────────────────────────────
+#
+#   1. Create a test repo, e.g. KidCarmi/aegisdiff-integration-target
+#   2. Sign in to the AegisDiff dashboard → connect that repo
+#      (this installs the GitHub App + registers the webhook automatically)
+#   3. Add 2 required secrets to KidCarmi/AegisDiff:
+#
+#      INTEGRATION_TEST_GITHUB_TOKEN  — GitHub PAT with `repo` scope on the test repo
+#      INTEGRATION_TEST_REPO          — "owner/name" of the test repo
+#
+#   Optional — to also verify the dashboard stored the scan:
+#      INTEGRATION_DASHBOARD_URL      — https://your-app.vercel.app
+#      INTEGRATION_API_KEY            — v1 REST API key (from GET /api/v1/key)
 
 on:
-  # Run every Monday at 08:00 UTC alongside the weekly digest
+  # Weekly canary — every Monday at 08:00 UTC
   schedule:
     - cron: "0 8 * * 1"
 
-  # Allow manual trigger from the Actions tab
+  # Manual trigger from the Actions tab
   workflow_dispatch:
-    inputs:
-      verbose:
-        description: "Show full pytest output (-s flag)"
-        type: boolean
-        default: true
 
-  # Also run when changes to the engine or this workflow are pushed
+  # Run when the engine or this workflow changes
   push:
     paths:
       - "aegisdiff/**"
@@ -44,15 +45,13 @@ on:
       - "claude/**"
 
 permissions:
-  contents: read
-  id-token: write   # OIDC for platform key fetch
-  models: read      # GitHub Models API (zero-config LLM fallback)
+  contents: read   # checkout only — no engine credentials needed
 
 jobs:
-  integration-test:
-    name: Live PR Scan
+  end-user-scan:
+    name: End-User PR Scan
     runs-on: ubuntu-latest
-    timeout-minutes: 15  # real LLM calls can take up to 60s each
+    timeout-minutes: 20   # 8-min scan timeout + buffer
 
     steps:
       - name: Checkout
@@ -64,48 +63,22 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      - name: Install dependencies
-        run: pip install --quiet -e ".[dev]" "PyJWT[cryptography]"
+      - name: Install test dependencies
+        run: pip install --quiet httpx pytest pytest-timeout
 
-      - name: Run integration test
+      - name: Run end-user integration test
         env:
-          # ── Test repo credentials ──────────────────────────────────────────
+          # Required — the only two secrets needed
           INTEGRATION_TEST_GITHUB_TOKEN: ${{ secrets.INTEGRATION_TEST_GITHUB_TOKEN }}
           INTEGRATION_TEST_REPO:         ${{ secrets.INTEGRATION_TEST_REPO }}
-          INTEGRATION_INSTALLATION_ID:   ${{ secrets.INTEGRATION_INSTALLATION_ID }}
 
-          # ── GitHub App credentials (already in our secrets) ───────────────
-          GITHUB_APP_ID:          ${{ secrets.GITHUB_APP_ID }}
-          GITHUB_APP_PRIVATE_KEY: ${{ secrets.GITHUB_APP_PRIVATE_KEY }}
-
-          # ── LLM providers — use production keys so the test uses the real stack ─
-          OPENROUTER_API_KEY:   ${{ secrets.OPENROUTER_API_KEY }}
-          OPENROUTER_API_KEY_2: ${{ secrets.OPENROUTER_API_KEY_2 }}
-          OPENROUTER_API_KEY_3: ${{ secrets.OPENROUTER_API_KEY_3 }}
-          GROQ_API_KEY:         ${{ secrets.GROQ_API_KEY }}
-          GROQ_API_KEY_2:       ${{ secrets.GROQ_API_KEY_2 }}
-          GROQ_API_KEY_3:       ${{ secrets.GROQ_API_KEY_3 }}
-          # GITHUB_TOKEN is auto-injected by Actions as zero-config LLM fallback
-
-          # ── Vercel dashboard — real ingest + read-back verification ─────────
-          # AEGISDIFF_INGEST_URL and AEGISDIFF_INGEST_TOKEN send real data to Vercel.
-          # INTEGRATION_DASHBOARD_URL + INTEGRATION_API_KEY read it back via
-          # GET /api/v1/scans to confirm the scan reached the Neon DB.
-          AEGISDIFF_INGEST_URL:        ${{ secrets.AEGISDIFF_INGEST_URL }}
-          AEGISDIFF_INGEST_TOKEN:      ${{ secrets.INTEGRATION_INGEST_TOKEN }}
-          INTEGRATION_DASHBOARD_URL:   ${{ secrets.INTEGRATION_DASHBOARD_URL }}
-          INTEGRATION_API_KEY:         ${{ secrets.INTEGRATION_API_KEY }}
-
-          # ── Sentry (optional) ─────────────────────────────────────────────
-          SENTRY_DSN:         ${{ secrets.SENTRY_DSN }}
-          SENTRY_ENVIRONMENT: integration-test
+          # Optional — enables Vercel dashboard read-back verification
+          INTEGRATION_DASHBOARD_URL:     ${{ secrets.INTEGRATION_DASHBOARD_URL }}
+          INTEGRATION_API_KEY:           ${{ secrets.INTEGRATION_API_KEY }}
 
         run: |
-          FLAGS="-v"
-          if [ "${{ github.event.inputs.verbose }}" = "true" ] || [ "${{ github.event_name }}" = "schedule" ]; then
-            FLAGS="-v -s"
-          fi
-          python -m pytest tests/test_integration_real_github.py $FLAGS \
+          python -m pytest tests/test_integration_real_github.py \
+            -v -s \
             --timeout=600 \
             --tb=short \
             --no-header \
@@ -114,10 +87,10 @@ jobs:
       - name: Write step summary
         if: always()
         run: |
-          echo "## Integration Test Result" >> "$GITHUB_STEP_SUMMARY"
+          echo "## End-User Integration Test" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Item | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| | |" >> "$GITHUB_STEP_SUMMARY"
           echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
           echo "| Test repo | \`${{ secrets.INTEGRATION_TEST_REPO }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Triggered by | ${{ github.event_name }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Commit | \`${{ github.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Dashboard check | ${{ secrets.INTEGRATION_DASHBOARD_URL != '' && '✓ enabled' || 'skipped' }} |" >> "$GITHUB_STEP_SUMMARY"
