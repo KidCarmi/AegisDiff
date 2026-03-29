@@ -8,6 +8,9 @@
  *   /login, /api/auth/**  → always public
  *   /api/llm-token        → public (OIDC-authenticated by the route itself)
  *   /api/ingest           → public (OIDC-authenticated by the route itself)
+ *   /api/webhooks/**      → public (HMAC-SHA256-authenticated by the route itself)
+ *   /api/badge/**         → public (SVG badges, no auth)
+ *   /api/cron/**          → public (CRON_SECRET-authenticated by the route itself)
  *   /api/v1/**            → public (Bearer ak_ key authenticated by the route)
  *   /admin/**             → requires platform:admin (githubId in PLATFORM_ADMIN_GITHUB_IDS)
  *   /api/admin/**         → requires platform:admin
@@ -23,6 +26,9 @@ const PUBLIC_PREFIXES = [
   "/api/ingest",
   "/api/llm-token",
   "/api/v1",
+  "/api/webhooks",   // GitHub App webhooks — HMAC-authenticated by the route itself
+  "/api/badge",      // public SVG badges
+  "/api/cron",       // Vercel cron — authenticated by CRON_SECRET in the route
   "/_next",
   "/favicon",
 ];
