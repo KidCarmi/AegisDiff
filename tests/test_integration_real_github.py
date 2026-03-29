@@ -42,9 +42,10 @@ import pytest
 # GITHUB_TOKEN (bot) cannot trigger other workflows; a real PAT can.
 PAT = os.environ.get("INTEGRATION_PAT", "")
 
-# Which repo to open the test PR on. Defaults to the current repo.
-TEST_REPO = os.environ.get("INTEGRATION_TEST_REPO",
-                           os.environ.get("GITHUB_REPOSITORY", ""))
+# MUST be a user repo that is connected to the AegisDiff dashboard —
+# NOT KidCarmi/AegisDiff itself (the platform repo has no webhook/App install).
+# Example: "KidCarmi/aegisdiff-integration-target"
+TEST_REPO = os.environ.get("INTEGRATION_TEST_REPO", "")
 
 # Optional dashboard verification
 DASHBOARD_URL = os.environ.get("INTEGRATION_DASHBOARD_URL", "").rstrip("/")
@@ -61,9 +62,11 @@ POLL_INTERVAL = 15
 pytestmark = pytest.mark.skipif(
     not (PAT and TEST_REPO),
     reason=(
-        "Integration test skipped — set INTEGRATION_PAT (a GitHub PAT with "
-        "`repo` scope) to run this test. GITHUB_TOKEN cannot be used because "
-        "it does not trigger other workflow runs."
+        "Integration test skipped. Required secrets:\n"
+        "  INTEGRATION_PAT       — GitHub PAT with `repo` scope\n"
+        "  INTEGRATION_TEST_REPO — a user repo connected to the AegisDiff dashboard\n"
+        "                          (NOT KidCarmi/AegisDiff — that is the platform repo)\n"
+        "Example: INTEGRATION_TEST_REPO=KidCarmi/aegisdiff-integration-target"
     ),
 )
 
@@ -262,6 +265,34 @@ class TestEndUserPRScan:
         print(f"  Repo      : {TEST_REPO}")
         print(f"  Dashboard : {DASHBOARD_URL or '(not configured)'}")
         print("=" * 66)
+
+        # ── Preflight: verify the repo is a connected user repo ───────────────
+        # KidCarmi/AegisDiff is the platform repo — it has no AegisDiff webhook.
+        # The test needs a DIFFERENT repo that the user connected via the dashboard.
+        current_repo = os.environ.get("GITHUB_REPOSITORY", "")
+        if TEST_REPO == current_repo:
+            pytest.fail(
+                f"\n\nINTEGRATION_TEST_REPO is set to '{TEST_REPO}' — that is the "
+                f"platform repo itself.\n\n"
+                f"The test needs a DIFFERENT repo that is connected to the AegisDiff "
+                f"dashboard (i.e. a user repo with the GitHub App installed).\n\n"
+                f"Steps:\n"
+                f"  1. Create a new repo, e.g. KidCarmi/aegisdiff-integration-target\n"
+                f"  2. Sign in to the AegisDiff dashboard → connect that repo\n"
+                f"  3. Set INTEGRATION_TEST_REPO=KidCarmi/aegisdiff-integration-target\n"
+                f"     in your GitHub Actions secrets"
+            )
+
+        # Quick check the repo exists and the PAT can access it
+        print("\n  [preflight] Checking test repo access...")
+        try:
+            info = self.gh._req("GET", f"/repos/{TEST_REPO}")
+            print(f"  ✓ Repo accessible: {info['full_name']}")
+        except Exception as e:
+            pytest.fail(
+                f"Cannot access {TEST_REPO} with the provided PAT: {e}\n"
+                f"Make sure INTEGRATION_PAT has `repo` scope on {TEST_REPO}."
+            )
 
         # ── [1] Open a real PR ────────────────────────────────────────────────
         print("\n  [1] Opening PR with vulnerable code...")
