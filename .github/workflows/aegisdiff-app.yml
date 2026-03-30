@@ -42,8 +42,10 @@ jobs:
       - name: Run triage engine
         env:
           # GitHub App credentials (our secrets — never user-supplied)
-          GITHUB_APP_ID:           ${{ secrets.GITHUB_APP_ID }}
-          GITHUB_APP_PRIVATE_KEY:  ${{ secrets.GITHUB_APP_PRIVATE_KEY }}
+          # Note: secret names cannot start with GITHUB_ (GitHub reserved prefix)
+          # so we store them as APP_ID / APP_PRIVATE_KEY
+          GITHUB_APP_ID:           ${{ secrets.APP_ID }}
+          GITHUB_APP_PRIVATE_KEY:  ${{ secrets.APP_PRIVATE_KEY }}
 
           # Error tracking (optional — no-ops if not set)
           SENTRY_DSN:              ${{ secrets.SENTRY_DSN }}
