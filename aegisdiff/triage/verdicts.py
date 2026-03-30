@@ -138,7 +138,7 @@ def parse_verdict(llm_output: str, provider: str = "unknown") -> Verdict:
     # Two passes:
     #   1. \u not followed by exactly 4 hex digits  →  \\u  (e.g. \username → \\username)
     #   2. any remaining bare backslash not part of a valid JSON escape  →  \\
-    text = re.sub(r'\\u(?![0-9a-fA-F]{4})', r'\\\\u', text)
+    text = re.sub(r"\\u(?![0-9a-fA-F]{4})", r"\\\\u", text)
     _VALID_JSON_ESCAPES = re.compile(r'\\(?!["\\/bfnrtu])')
     text = _VALID_JSON_ESCAPES.sub(r"\\\\", text)
 
