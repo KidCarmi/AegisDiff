@@ -61,6 +61,7 @@ class Verdict:
             evidence="",
             sanitizer_found=False,
             sanitizer_description=None,
+            provider="aegisdiff/static-analysis",
             attack_vector=None,
             remediation=None,
             false_positive_reason="Empty or non-security diff",
@@ -89,6 +90,7 @@ class Verdict:
             attack_vector=None,
             remediation=None,
             false_positive_reason=reason,
+            provider="aegisdiff/suppress-rule",
             file_path=file_path,
             line_number=line_number,
         )
