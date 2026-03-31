@@ -1,0 +1,10 @@
+title = "AegisDiff Gitleaks Configuration"
+
+[allowlist]
+description = "Allowlist for security test fixtures"
+# tests/fixtures/*.diff are synthetic diffs used to verify AegisDiff detects
+# hardcoded secrets. They intentionally contain fake tokens so the LLM can
+# recognise them as TRUE_POSITIVE — they are NOT real credentials.
+paths = [
+    "tests/fixtures",
+]

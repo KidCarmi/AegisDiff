@@ -46,7 +46,7 @@ REPO = "webapp"
 PR_NUMBER = 7
 COMMIT_SHA = "abc1234def5678901234567890abcdef12345678"
 INSTALLATION_ID = 99
-FAKE_TOKEN = "ghs_fake_installation_token"
+FAKE_TOKEN = "test_fake_installation_token"
 INGEST_URL = "https://aegisdiff.app/api/ingest"
 INGEST_TOKEN = "ak_test_ingest_token_xyz"
 GITHUB_API = "https://api.github.com"
@@ -130,7 +130,7 @@ def _env_vars() -> dict:
         "COMMIT_SHA": COMMIT_SHA,
         # Only GitHub Models available — the zero-config fallback.
         # No OPENROUTER_API_KEY / GROQ_API_KEY so the provider list is minimal.
-        "GITHUB_TOKEN": "ghs_github_actions_token",
+        "GITHUB_TOKEN": "test_github_actions_token",
         "AEGISDIFF_INGEST_URL": INGEST_URL,
         "AEGISDIFF_INGEST_TOKEN": INGEST_TOKEN,
     }

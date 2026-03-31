@@ -8,7 +8,7 @@ import respx
 from aegisdiff.llm.providers.base import LLMRequest
 from aegisdiff.llm.providers.github_models import GITHUB_MODELS_URL, GitHubModelsProvider
 
-GITHUB_TOKEN = "ghs_test_token_abc123"
+GITHUB_TOKEN = "test_github_token_abc123"
 
 SAMPLE_REQUEST = LLMRequest(
     system_prompt="You are a security expert.",

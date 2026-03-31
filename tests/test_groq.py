@@ -8,7 +8,7 @@ import respx
 from aegisdiff.llm.providers.base import LLMRequest
 from aegisdiff.llm.providers.groq import GROQ_API_URL, GroqProvider
 
-API_KEY = "gsk_test_key_abc123"
+API_KEY = "test_groq_api_key_abc123"
 
 SAMPLE_REQUEST = LLMRequest(
     system_prompt="You are a security expert.",

@@ -18,7 +18,7 @@ from aegisdiff.github.app_client import GitHubAppClient
 # Shared helpers
 # ---------------------------------------------------------------------------
 
-FAKE_TOKEN = "ghs_fake_installation_token"
+FAKE_TOKEN = "test_fake_installation_token"
 APP_ID = "123456"
 PRIVATE_KEY = "fake-pem"  # never decoded in these tests (get_installation_token mocked)
 OWNER = "acme"
