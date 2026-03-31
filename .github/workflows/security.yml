@@ -10,6 +10,9 @@ on:
     - cron: "0 6 * * 1" # Every Monday 06:00 UTC
   workflow_dispatch: # allow manual runs on any branch
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 permissions:
   contents: read
   security-events: write # required to upload SARIF to GitHub Security tab
