@@ -26,7 +26,7 @@ def get_oidc_token() -> str | None:
         resp.raise_for_status()
         return resp.json().get("value")
     except Exception as e:
-        logger.debug("OIDC token request failed (will skip platform keys): %s", e)
+        logger.debug("OIDC token request failed (will skip platform keys): %s", type(e).__name__)
         return None
 
 

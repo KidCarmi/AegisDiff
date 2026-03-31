@@ -71,9 +71,4 @@ jobs:
           AEGISDIFF_INGEST_TOKEN: ${{ github.event.client_payload.ingest_token }}
         run: python -m aegisdiff.app_entrypoint
 
-      - name: Write step summary
-        if: always()
-        run: |
-          if [ -f /tmp/step_summary.md ]; then
-            cat /tmp/step_summary.md >> "$GITHUB_STEP_SUMMARY"
-          fi
+      # Step summary is written directly to $GITHUB_STEP_SUMMARY by app_entrypoint.py

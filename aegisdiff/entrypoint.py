@@ -9,6 +9,7 @@ ingest endpoint (no code content, metadata only).
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -329,9 +330,12 @@ def main() -> None:
                 "or set AEGISDIFF_REPO_TOKEN in GitHub Secrets."
             )
 
-    # Print to GitHub Actions step summary
+    # Print to GitHub Actions step summary (write directly to $GITHUB_STEP_SUMMARY)
     try:
-        step_summary = Path("/tmp/step_summary.md")
+        step_summary_path = os.environ.get("GITHUB_STEP_SUMMARY", "")
+        if not step_summary_path:
+            return
+        step_summary = Path(step_summary_path)
         tp_count = sum(1 for v in all_verdicts if v.verdict == VerdictType.TRUE_POSITIVE)
         summary_lines = [
             f"## AegisDiff — {verdict.verdict.value}",
@@ -343,7 +347,8 @@ def main() -> None:
             summary_lines.append(
                 f"\n_{len(all_verdicts)} file(s) analyzed, {tp_count} true positive(s)_"
             )
-        step_summary.write_text("\n".join(summary_lines) + "\n")
+        with step_summary.open("a") as f:
+            f.write("\n".join(summary_lines) + "\n")
         logger.info("Step summary written")
     except OSError:
         pass

@@ -90,14 +90,12 @@ jobs:
           AEGISDIFF_REPO_TOKEN: ${{ steps.oidc.outputs.token }}
         run: python -m aegisdiff.entrypoint
 
-      - name: Write step summary
+      - name: Write step summary header
         if: always()
         run: |
           echo "### Canary Scan — \`tests/fixtures/sample.diff\`" >> "$GITHUB_STEP_SUMMARY"
           echo "Expected: **TRUE_POSITIVE** (cmd injection + path traversal)" >> "$GITHUB_STEP_SUMMARY"
-          if [ -f /tmp/step_summary.md ]; then
-            cat /tmp/step_summary.md >> "$GITHUB_STEP_SUMMARY"
-          fi
+          # entrypoint.py writes the verdict directly to $GITHUB_STEP_SUMMARY
 
   # ── Job 3: dogfood — scan this PR's own diff ──────────────────────────────
   appsec:
@@ -177,11 +175,9 @@ jobs:
           AEGISDIFF_REPO_TOKEN:  ${{ steps.oidc.outputs.token }}
         run: python -m aegisdiff.entrypoint
 
-      - name: Write step summary
+      - name: Write step summary header
         if: always() && steps.diff.outputs.skip == 'false'
         run: |
           echo "### AegisDiff Self-Scan" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Diff lines:** ${{ steps.diff.outputs.diff_lines || 0 }}" >> "$GITHUB_STEP_SUMMARY"
-          if [ -f /tmp/step_summary.md ]; then
-            cat /tmp/step_summary.md >> "$GITHUB_STEP_SUMMARY"
-          fi
+          # entrypoint.py writes the verdict directly to $GITHUB_STEP_SUMMARY
