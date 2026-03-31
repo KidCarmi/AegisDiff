@@ -138,13 +138,13 @@ jobs:
 
           timeout 60 git diff "${BASE_SHA}...${HEAD_SHA}" \
             -- "*.py" "*.js" "*.ts" "*.tsx" "*.jsx" "*.go" "*.java" "*.rb" "*.php" \
-            > /tmp/aegisdiff_pr.diff 2>/dev/null || true
+            > "$RUNNER_TEMP/aegisdiff_pr.diff" 2>/dev/null || true
 
-          if [ ! -s /tmp/aegisdiff_pr.diff ]; then
+          if [ ! -s "$RUNNER_TEMP/aegisdiff_pr.diff" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "diff_lines=$(wc -l < /tmp/aegisdiff_pr.diff)" >> "$GITHUB_OUTPUT"
+            echo "diff_lines=$(wc -l < "$RUNNER_TEMP/aegisdiff_pr.diff")" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Get OIDC token for ingest auth
@@ -170,7 +170,7 @@ jobs:
           PR_NUMBER:             ${{ github.event.pull_request.number || '' }}
           COMMIT_SHA:            ${{ github.sha }}
           REPO:                  ${{ github.repository }}
-          DIFF_PATH:             /tmp/aegisdiff_pr.diff
+          DIFF_PATH:             ${{ runner.temp }}/aegisdiff_pr.diff
           AEGISDIFF_INGEST_URL:  ${{ secrets.AEGISDIFF_INGEST_URL }}
           AEGISDIFF_REPO_TOKEN:  ${{ steps.oidc.outputs.token }}
         run: python -m aegisdiff.entrypoint

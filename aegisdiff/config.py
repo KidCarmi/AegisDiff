@@ -41,7 +41,7 @@ def load_config() -> Config:
         repo=os.environ.get("REPO", ""),
         pr_number=pr_number,
         commit_sha=os.environ.get("COMMIT_SHA", "unknown"),
-        diff_path=os.environ.get("DIFF_PATH", "/tmp/aegisdiff_pr.diff"),
+        diff_path=os.environ.get("DIFF_PATH", ""),  # set by ci.yml via $RUNNER_TEMP
         aegisdiff_ingest_url=os.environ.get("AEGISDIFF_INGEST_URL"),
         aegisdiff_repo_token=os.environ.get("AEGISDIFF_REPO_TOKEN"),
         aegisdiff_gist_id=os.environ.get("AEGISDIFF_GIST_ID"),
