@@ -8,6 +8,7 @@ on:
       - "aegisdiff-e2e-*"   # integration test branches — skip security scan
   schedule:
     - cron: "0 6 * * 1" # Every Monday 06:00 UTC
+  workflow_dispatch: # allow manual runs on any branch
 
 permissions:
   contents: read
