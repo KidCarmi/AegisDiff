@@ -230,12 +230,10 @@ class LLMOrchestrator:
             max_block = max(available, 200)  # always keep at least 200 chars
             truncated = code_block[:max_block] + "\n\n[...TRUNCATED — context limit reached...]"
             user_msg = prefix + truncated + suffix
-            logger.warning(  # nosemgrep -- provider.name is a model identifier, not a credential
-                "Context trimmed from ~%d → ~%d effective tokens for provider %s (scale=%.0f%%)",
-                estimated_tokens,
-                effective_max,
-                provider.name,
-                context_scale * 100,
+            _trim_msg = (
+                f"Context trimmed from ~{int(estimated_tokens)} → ~{int(effective_max)}"
+                f" effective tokens (scale={context_scale:.0%}) [{provider.name}]"
             )
+            logger.warning(_trim_msg)
 
         return replace(request, user_message=user_msg)
