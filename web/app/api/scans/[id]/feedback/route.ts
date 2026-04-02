@@ -13,6 +13,8 @@ import { requireRepoRole } from "../../../../../lib/rbac";
 import { sql } from "../../../../../lib/db";
 import type { VerdictType } from "../../../../../lib/types";
 
+export const dynamic = "force-dynamic";
+
 const VALID_VERDICTS: VerdictType[] = [
   "TRUE_POSITIVE",
   "FALSE_POSITIVE",
@@ -22,15 +24,16 @@ const VALID_VERDICTS: VerdictType[] = [
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params;
   try {
     const session = await getServerSession(authOptions);
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const scanId = params.id;
+    const scanId = id;
     // Basic UUID format check
     if (!/^[0-9a-f-]{36}$/.test(scanId)) {
       return NextResponse.json({ error: "Invalid scan ID" }, { status: 400 });

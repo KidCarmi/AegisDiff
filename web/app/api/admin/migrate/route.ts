@@ -11,6 +11,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sql } from "../../../../lib/db";
 
+export const dynamic = "force-dynamic";
+
 export async function POST(req: NextRequest) {
   const secret = process.env.ADMIN_SECRET;
   if (!secret) {

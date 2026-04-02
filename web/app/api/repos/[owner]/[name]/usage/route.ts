@@ -11,16 +11,20 @@ import { authOptions } from "../../../../../../lib/auth";
 import { requireRepoRole } from "../../../../../../lib/rbac";
 import { sql } from "../../../../../../lib/db";
 
+export const dynamic = "force-dynamic";
+
 const DEFAULT_DAILY_LIMIT = 100;
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { owner: string; name: string } },
+  { params }: { params: Promise<{ owner: string; name: string }> },
 ) {
+  const { owner, name } = await params;
   const session = await getServerSession(authOptions);
   try {
-    await requireRepoRole(session, params.owner, params.name, "repo:viewer");
+    await requireRepoRole(session, owner, name, "repo:viewer");
   } catch (r) {
+    const { owner, name } = await params;
     return r as Response;
   }
 
@@ -36,7 +40,7 @@ export async function GET(
       ) AS tp_today
     FROM repos r
     LEFT JOIN scans s ON s.repo_id = r.id
-    WHERE r.owner = ${params.owner} AND r.name = ${params.name}
+    WHERE r.owner = ${owner} AND r.name = ${name}
     GROUP BY r.id, r.custom_daily_limit
   `;
 

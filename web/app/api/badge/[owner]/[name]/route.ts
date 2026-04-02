@@ -6,6 +6,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sql } from "../../../../../lib/db";
 
+export const dynamic = "force-dynamic";
+
 const COLORS: Record<string, string> = {
   TRUE_POSITIVE: "#e11d48",
   FALSE_POSITIVE: "#16a34a",
@@ -51,10 +53,9 @@ function badge(verdict: string): string {
 
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { owner: string; name: string } },
+  { params }: { params: Promise<{ owner: string; name: string }> },
 ) {
-  const { owner, name } = params;
-
+  const { owner, name } = await params;
   const rows = await sql`
     SELECT s.verdict FROM scans s
     JOIN repos r ON s.repo_id = r.id

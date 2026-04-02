@@ -2,13 +2,33 @@
  * Neon PostgreSQL client (serverless driver — optimized for edge/serverless).
  * Connection pooling is handled automatically by the Neon serverless driver.
  */
-import { neon } from "@neondatabase/serverless";
+import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
 
-if (!process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL environment variable is not set");
+// Lazy singleton — Neon client is created on first query, not at module load.
+// This allows `next build` to complete without DATABASE_URL set in the build
+// environment (Vercel sets it at runtime). The error surfaces on the first
+// actual DB query if the env var is missing.
+let _client: NeonQueryFunction<false, false> | null = null;
+
+function getClient(): NeonQueryFunction<false, false> {
+  if (!_client) {
+    if (!process.env.DATABASE_URL) {
+      throw new Error("DATABASE_URL environment variable is not set");
+    }
+    _client = neon(process.env.DATABASE_URL);
+  }
+  return _client;
 }
 
-export const sql = neon(process.env.DATABASE_URL);
+// sql is a tagged-template proxy — same API as neon(), but lazily initialized.
+export const sql: NeonQueryFunction<false, false> = new Proxy(
+  (() => {}) as unknown as NeonQueryFunction<false, false>,
+  {
+    apply(_t, _this, args) {
+      return (getClient() as unknown as Function).apply(_this, args);
+    },
+  }
+);
 
 // ── Schema types ────────────────────────────────────────────────────────────
 

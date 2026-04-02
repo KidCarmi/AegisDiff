@@ -17,15 +17,16 @@ import { authOptions } from "../../../../../../lib/auth";
 import { requireRepoRole } from "../../../../../../lib/rbac";
 import { sql } from "../../../../../../lib/db";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(
   req: NextRequest,
-  { params }: { params: { owner: string; name: string } },
+  { params }: { params: Promise<{ owner: string; name: string }> },
 ) {
+  const { owner, name } = await params;
   const session = await getServerSession(authOptions);
-  try { await requireRepoRole(session, params.owner, params.name, "repo:viewer"); }
+  try { await requireRepoRole(session, owner, name, "repo:viewer"); }
   catch (r) { return r as Response; }
-
-  const { owner, name } = params;
 
   // Validate path params
   if (!/^[\w.-]+$/.test(owner) || !/^[\w.-]+$/.test(name)) {

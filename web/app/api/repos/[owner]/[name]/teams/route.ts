@@ -4,21 +4,25 @@ import { authOptions } from "../../../../../../lib/auth";
 import { sql } from "../../../../../../lib/db";
 import { requireRepoRole } from "../../../../../../lib/rbac";
 
-export async function GET(req: NextRequest, { params }: { params: { owner: string; name: string } }) {
+export const dynamic = "force-dynamic";
+
+export async function GET(req: NextRequest, { params }: { params: Promise<{ owner: string; name: string }> }) {
+  const { owner, name } = await params;
   const session = await getServerSession(authOptions);
-  try { await requireRepoRole(session, params.owner, params.name, "repo:viewer"); }
+  try { await requireRepoRole(session, owner, name, "repo:viewer"); }
   catch (r) { return r as Response; }
 
   const rows = await sql`SELECT teams_webhook_url FROM repos
-    WHERE owner = ${params.owner} AND name = ${params.name} LIMIT 1`;
+    WHERE owner = ${owner} AND name = ${name} LIMIT 1`;
   const url = (rows[0] as any)?.teams_webhook_url as string | null;
   const masked = url ? url.replace(/\?.*$/, "?****") : null;
   return NextResponse.json({ configured: !!url, masked });
 }
 
-export async function PATCH(req: NextRequest, { params }: { params: { owner: string; name: string } }) {
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ owner: string; name: string }> }) {
+  const { owner, name } = await params;
   const session = await getServerSession(authOptions);
-  try { await requireRepoRole(session, params.owner, params.name, "repo:admin"); }
+  try { await requireRepoRole(session, owner, name, "repo:admin"); }
   catch (r) { return r as Response; }
 
   const body = await req.json().catch(() => null);
@@ -27,6 +31,6 @@ export async function PATCH(req: NextRequest, { params }: { params: { owner: str
     return NextResponse.json({ error: "Must be a Microsoft Teams webhook URL" }, { status: 400 });
 
   await sql`UPDATE repos SET teams_webhook_url = ${url}
-    WHERE owner = ${params.owner} AND name = ${params.name}`;
+    WHERE owner = ${owner} AND name = ${name}`;
   return NextResponse.json({ ok: true });
 }

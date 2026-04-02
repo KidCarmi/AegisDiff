@@ -10,6 +10,8 @@ import { authOptions } from "../../../../lib/auth";
 import { sql } from "../../../../lib/db";
 import { isPlatformAdminSession } from "../../../../lib/rbac";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(_req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session || !isPlatformAdminSession(session)) {

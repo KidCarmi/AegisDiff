@@ -11,6 +11,8 @@ import { authOptions } from "../../../../lib/auth";
 import { sql } from "../../../../lib/db";
 import { randomBytes, createHash } from "crypto";
 
+export const dynamic = "force-dynamic";
+
 async function requireSession(req: NextRequest) {
   const session = await getServerSession(authOptions);
   return session ?? null;

@@ -5,7 +5,7 @@ import { sql } from "../../../../lib/db";
 import { VerdictBadge } from "../../../../components/VerdictBadge";
 import type { Scan } from "../../../../lib/types";
 
-interface Props { params: { owner: string; name: string } }
+interface Props { params: Promise<{ owner: string; name: string }> }
 
 async function getRepoStats(owner: string, name: string) {
   const rows = await sql`
@@ -90,7 +90,7 @@ const SEV_COLOR: Record<string, string> = {
 };
 
 export default async function RepoDetailPage({ params }: Props) {
-  const { owner, name } = params;
+  const { owner, name } = await params;
   const session = await getServerSession(authOptions);
   if (!session) redirect("/api/auth/signin");
 

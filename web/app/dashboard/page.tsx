@@ -147,7 +147,7 @@ export default async function DashboardPage() {
   ]);
 
   // New users with no repos → onboarding (skip if they already completed it)
-  const onboarded = cookies().get("aegisdiff_onboarded");
+  const onboarded = (await cookies()).get("aegisdiff_onboarded");
   if (!connected && scans.length === 0 && !onboarded) {
     redirect("/onboarding");
   }

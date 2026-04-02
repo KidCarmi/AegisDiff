@@ -9,6 +9,8 @@ import { createHash } from "crypto";
 import { authOptions, verifyRepoAccess } from "../../../lib/auth";
 import { sql } from "../../../lib/db";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

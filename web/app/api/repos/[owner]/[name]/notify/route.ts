@@ -11,26 +11,30 @@ import { authOptions } from '../../../../../../lib/auth';
 import { requireRepoRole } from '../../../../../../lib/rbac';
 import { sql } from "../../../../../../lib/db";
 
+export const dynamic = "force-dynamic";
+
 const SEVERITY_RANK: Record<string, number> = {
   INFO: 0, LOW: 1, MEDIUM: 2, HIGH: 3, CRITICAL: 4,
 };
 
-export async function GET(req: NextRequest, { params }: { params: { owner: string; name: string } }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ owner: string; name: string }> }) {
+  const { owner, name } = await params;
   const session = await getServerSession(authOptions);
-  try { await requireRepoRole(session, params.owner, params.name, "repo:viewer"); }
+  try { await requireRepoRole(session, owner, name, "repo:viewer"); }
   catch (r) { return r as Response; }
 
   const rows = await sql`
     SELECT notify_min_severity AS "minSeverity",
            notify_on_needs_review AS "notifyNeedsReview",
            auto_github_issue AS "autoGithubIssue"
-    FROM repos WHERE owner = ${params.owner} AND name = ${params.name} LIMIT 1`;
+    FROM repos WHERE owner = ${owner} AND name = ${name} LIMIT 1`;
   return NextResponse.json(rows[0] ?? { minSeverity: "INFO", notifyNeedsReview: false, autoGithubIssue: false });
 }
 
-export async function PATCH(req: NextRequest, { params }: { params: { owner: string; name: string } }) {
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ owner: string; name: string }> }) {
+  const { owner, name } = await params;
   const session = await getServerSession(authOptions);
-  try { await requireRepoRole(session, params.owner, params.name, "repo:admin"); }
+  try { await requireRepoRole(session, owner, name, "repo:admin"); }
   catch (r) { return r as Response; }
 
   const body = await req.json().catch(() => ({}));
@@ -44,6 +48,6 @@ export async function PATCH(req: NextRequest, { params }: { params: { owner: str
       notify_min_severity    = COALESCE(${minSeverity ?? null}, notify_min_severity),
       notify_on_needs_review = COALESCE(${notifyNeedsReview ?? null}, notify_on_needs_review),
       auto_github_issue      = COALESCE(${autoGithubIssue ?? null}, auto_github_issue)
-    WHERE owner = ${params.owner} AND name = ${params.name}`;
+    WHERE owner = ${owner} AND name = ${name}`;
   return NextResponse.json({ ok: true });
 }

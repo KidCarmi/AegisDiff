@@ -5,20 +5,21 @@ import { NotificationLayout } from "../NotificationLayout";
 import { SlackForm } from "./SlackForm";
 
 interface Props {
-  params: { owner: string; name: string };
+  params: Promise<{ owner: string; name: string }>;
 }
 
 export default async function SlackSettingsPage({ params }: Props) {
+  const { owner, name } = await params;
   const session = await getServerSession(authOptions);
   if (!session) redirect("/api/auth/signin");
 
   const accessToken = (session.user as any).accessToken as string;
-  const ok = await verifyRepoAccess(accessToken, params.owner, params.name);
+  const ok = await verifyRepoAccess(accessToken, owner, name);
   if (!ok) notFound();
 
   return (
-    <NotificationLayout owner={params.owner} name={params.name}>
-      <SlackForm owner={params.owner} name={params.name} />
+    <NotificationLayout owner={owner} name={name}>
+      <SlackForm owner={owner} name={name} />
     </NotificationLayout>
   );
 }

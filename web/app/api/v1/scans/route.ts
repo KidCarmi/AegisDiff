@@ -16,6 +16,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "crypto";
 import { sql } from "../../../../lib/db";
 
+export const dynamic = "force-dynamic";
+
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, OPTIONS",

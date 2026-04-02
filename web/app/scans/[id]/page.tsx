@@ -56,17 +56,18 @@ function confidenceLabel(conf: number): string {
 }
 
 interface Props {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }
 
 export default async function ScanDetailPage({ params }: Props) {
+  const { id } = await params;
   const session = await getServerSession(authOptions);
   if (!session) redirect("/api/auth/signin");
 
   const githubId = (session.user as any).githubId as number;
   const accessToken = (session.user as any).accessToken as string;
   const username = (session.user as any).username as string ?? session.user?.name ?? "";
-  const scan = await getScan(params.id, githubId, username);
+  const scan = await getScan(id, githubId, username);
   if (!scan) notFound();
 
   // Resolve whether user can trigger rescan (repo:developer+)

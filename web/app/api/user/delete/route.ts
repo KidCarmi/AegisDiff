@@ -19,6 +19,8 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "../../../../lib/auth";
 import { sql } from "../../../../lib/db";
 
+export const dynamic = "force-dynamic";
+
 export async function DELETE(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) {

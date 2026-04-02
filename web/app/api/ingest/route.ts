@@ -19,6 +19,8 @@ import { sql } from "../../../lib/db";
 import type { IngestPayload } from "../../../lib/types";
 import { sendScanAlertEmail } from "../../../lib/email";
 
+export const dynamic = "force-dynamic";
+
 const ALLOWED_VERDICTS = new Set(["TRUE_POSITIVE", "FALSE_POSITIVE", "NEEDS_REVIEW", "ERROR"]);
 const SEVERITY_RANK: Record<string, number> = {
   INFO: 0, LOW: 1, MEDIUM: 2, HIGH: 3, CRITICAL: 4, "N/A": -1,

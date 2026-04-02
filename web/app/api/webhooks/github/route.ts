@@ -19,6 +19,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createHmac, createHash, timingSafeEqual } from "crypto";
 import { sql } from "../../../../lib/db";
 
+export const dynamic = "force-dynamic";
+
 /**
  * Derive a stable, per-repo ingest token from the webhook secret.
  * token = HMAC-SHA256(GITHUB_APP_WEBHOOK_SECRET, "owner/name")

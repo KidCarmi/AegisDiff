@@ -13,23 +13,27 @@ import { requireRepoRole } from '../../../../../../lib/rbac';
 import { sql } from "../../../../../../lib/db";
 
 
-export async function GET(req: NextRequest, { params }: { params: { owner: string; name: string } }) {
+export const dynamic = "force-dynamic";
+
+export async function GET(req: NextRequest, { params }: { params: Promise<{ owner: string; name: string }> }) {
+  const { owner, name } = await params;
   const session = await getServerSession(authOptions);
-  try { await requireRepoRole(session, params.owner, params.name, "repo:viewer"); }
+  try { await requireRepoRole(session, owner, name, "repo:viewer"); }
   catch (r) { return r as Response; }
 
   const rows = await sql`
     SELECT ir.id, ir.cwe_id, ir.title_keyword, ir.reason, ir.created_at
     FROM ignore_rules ir
     JOIN repos r ON ir.repo_id = r.id
-    WHERE r.owner = ${params.owner} AND r.name = ${params.name}
+    WHERE r.owner = ${owner} AND r.name = ${name}
     ORDER BY ir.created_at DESC`;
   return NextResponse.json({ rules: rows });
 }
 
-export async function POST(req: NextRequest, { params }: { params: { owner: string; name: string } }) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ owner: string; name: string }> }) {
+  const { owner, name } = await params;
   const session = await getServerSession(authOptions);
-  try { await requireRepoRole(session, params.owner, params.name, "repo:admin"); }
+  try { await requireRepoRole(session, owner, name, "repo:admin"); }
   catch (r) { return r as Response; }
 
   const body = await req.json().catch(() => ({}));
@@ -40,7 +44,7 @@ export async function POST(req: NextRequest, { params }: { params: { owner: stri
   if (!cweId && !titleKeyword)
     return NextResponse.json({ error: "Provide cweId or titleKeyword" }, { status: 400 });
 
-  const repoRows = await sql`SELECT id FROM repos WHERE owner=${params.owner} AND name=${params.name} LIMIT 1`;
+  const repoRows = await sql`SELECT id FROM repos WHERE owner=${owner} AND name=${name} LIMIT 1`;
   if (!repoRows.length) return NextResponse.json({ error: "Repo not found" }, { status: 404 });
   const repoId = (repoRows[0] as any).id;
 
@@ -50,9 +54,10 @@ export async function POST(req: NextRequest, { params }: { params: { owner: stri
   return NextResponse.json({ ok: true }, { status: 201 });
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: { owner: string; name: string } }) {
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ owner: string; name: string }> }) {
+  const { owner, name } = await params;
   const session = await getServerSession(authOptions);
-  try { await requireRepoRole(session, params.owner, params.name, "repo:admin"); }
+  try { await requireRepoRole(session, owner, name, "repo:admin"); }
   catch (r) { return r as Response; }
 
   const id = new URL(req.url).searchParams.get("id");
@@ -62,6 +67,6 @@ export async function DELETE(req: NextRequest, { params }: { params: { owner: st
     DELETE FROM ignore_rules ir
     USING repos r
     WHERE ir.id = ${parseInt(id, 10)} AND ir.repo_id = r.id
-      AND r.owner = ${params.owner} AND r.name = ${params.name}`;
+      AND r.owner = ${owner} AND r.name = ${name}`;
   return NextResponse.json({ ok: true });
 }

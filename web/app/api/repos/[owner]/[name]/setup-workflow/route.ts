@@ -13,6 +13,8 @@ import { requireRepoRole } from "../../../../../../lib/rbac";
 import { sql } from "../../../../../../lib/db";
 import { getInstallationToken, getRepoInstallationId, ghFetch } from "../../../../../../lib/github-app";
 
+export const dynamic = "force-dynamic";
+
 const WORKFLOW_PATH = ".github/workflows/aegisdiff.yml";
 
 function buildWorkflowContent(ingestUrl: string): string {
@@ -96,14 +98,15 @@ jobs:
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { owner: string; name: string } }
+  { params }: { params: Promise<{ owner: string; name: string }> }
 ) {
+  const { owner, name } = await params;
   try {
     const session = await getServerSession(authOptions);
-    try { await requireRepoRole(session, params.owner, params.name, "repo:admin"); }
+    try { await requireRepoRole(session, owner, name, "repo:admin"); }
     catch (r) { return r as Response; }
 
-    const { owner, name } = params;
+    // (await already applied above)
 
     // Get the installation ID for this repo
     const rows = await sql`

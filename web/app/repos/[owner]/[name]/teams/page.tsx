@@ -4,17 +4,18 @@ import { authOptions, verifyRepoAccess } from "../../../../../lib/auth";
 import { NotificationLayout } from "../NotificationLayout";
 import { TeamsForm } from "./TeamsForm";
 
-interface Props { params: { owner: string; name: string } }
+interface Props { params: Promise<{ owner: string; name: string }> }
 
 export default async function TeamsSettingsPage({ params }: Props) {
+  const { owner, name } = await params;
   const session = await getServerSession(authOptions);
   if (!session) redirect("/api/auth/signin");
-  const ok = await verifyRepoAccess((session.user as any).accessToken, params.owner, params.name);
+  const ok = await verifyRepoAccess((session.user as any).accessToken, owner, name);
   if (!ok) notFound();
 
   return (
-    <NotificationLayout owner={params.owner} name={params.name}>
-      <TeamsForm owner={params.owner} name={params.name} />
+    <NotificationLayout owner={owner} name={name}>
+      <TeamsForm owner={owner} name={name} />
     </NotificationLayout>
   );
 }

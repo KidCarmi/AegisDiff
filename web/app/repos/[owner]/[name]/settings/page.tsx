@@ -4,11 +4,11 @@ import { authOptions, verifyRepoAccess } from "../../../../../lib/auth";
 import { RepoSettingsTabs } from "./RepoSettingsTabs";
 
 interface Props {
-  params: { owner: string; name: string };
+  params: Promise<{ owner: string; name: string }>;
 }
 
 export default async function RepoSettingsPage({ params }: Props) {
-  const { owner, name } = params;
+  const { owner, name } = await params;
   const session = await getServerSession(authOptions);
   if (!session) redirect("/api/auth/signin");
 

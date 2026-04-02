@@ -12,6 +12,8 @@ import { authOptions } from "../../../../lib/auth";
 import { sql } from "../../../../lib/db";
 import { generateAppJWT, getInstallationToken, ghFetch } from "../../../../lib/github-app";
 
+export const dynamic = "force-dynamic";
+
 function deriveRepoToken(repoSlug: string): string {
   const secret = process.env.GITHUB_APP_WEBHOOK_SECRET;
   if (!secret) throw new Error("GITHUB_APP_WEBHOOK_SECRET is not set — cannot derive repo token");

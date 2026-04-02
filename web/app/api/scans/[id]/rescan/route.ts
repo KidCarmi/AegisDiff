@@ -14,6 +14,8 @@ import { sql } from "../../../../../lib/db";
 import { createHmac } from "crypto";
 import { getInstallationToken } from "../../../../../lib/github-app";
 
+export const dynamic = "force-dynamic";
+
 const MAX_RESCANS_PER_HOUR = 3;
 
 function deriveRepoToken(repoSlug: string): string {
@@ -24,15 +26,16 @@ function deriveRepoToken(repoSlug: string): string {
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params;
   try {
     const session = await getServerSession(authOptions);
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const scanId = params.id;
+    const scanId = id;
     if (!/^[0-9a-f-]{36}$/.test(scanId)) {
       return NextResponse.json({ error: "Invalid scan ID" }, { status: 400 });
     }

@@ -13,6 +13,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sql } from "../../../../lib/db";
 
+export const dynamic = "force-dynamic";
+
 // Severity ordering for summary display
 const SEVERITY_ORDER: Record<string, number> = {
   CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1, INFO: 0,

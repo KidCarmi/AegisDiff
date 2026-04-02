@@ -9,7 +9,7 @@ export default async function OnboardingPage() {
   if (!session) redirect("/api/auth/signin");
 
   // Already completed onboarding → go straight to dashboard
-  if (cookies().get("aegisdiff_onboarded")) redirect("/dashboard");
+  if ((await cookies()).get("aegisdiff_onboarded")) redirect("/dashboard");
 
   const username =
     (session.user as any).username as string ?? session.user?.name ?? "";
