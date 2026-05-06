@@ -202,16 +202,46 @@ def _is_test(path: str) -> bool:
     return any(seg in _TEST_DIR_SEGMENTS for seg in segs)
 
 
+# Tokens are runs of [a-z0-9]; everything else (including "/", "_", "-",
+# ".", whitespace, punctuation) is a token boundary. This is what gives
+# the classifier its "match whole word, not arbitrary substring" property:
+# "src/authors/x.py" tokenises to {"src", "authors", "x", "py"} so the
+# keyword "auth" no longer matches.
+_TOKEN_SPLIT_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _tokenize(path: str) -> set:
+    """Split a path into a set of normalised lowercase alphanumeric tokens.
+
+    Examples:
+        "src/auth/login.py"      → {"src", "auth", "login", "py"}
+        "src/path/user_file.py"  → {"src", "path", "user", "file", "py"}
+        "src/authors/svc.py"     → {"src", "authors", "svc", "py"}
+        "src/pathology/model.py" → {"src", "pathology", "model", "py"}
+    """
+    return {t for t in _TOKEN_SPLIT_RE.split(path.lower()) if t}
+
+
 def _score_keywords(path: str) -> Tuple[int, List[str]]:
-    """Return (added_score, matched_keywords) for the given path."""
-    p = path.lower()
+    """Return (added_score, matched_keywords) for the given path.
+
+    Keywords are matched as *whole tokens*, not substrings — so
+    ``pathology`` does not match ``path``, ``authors`` does not match
+    ``auth``, ``filecoin`` does not match ``file``, etc. Tokens are
+    produced by splitting on any non-alphanumeric character (``/``, ``_``,
+    ``-``, ``.``, whitespace, …), so compound names like ``user_file`` or
+    ``orders_controller`` still match each of their underlying tokens.
+    """
+    tokens = _tokenize(path)
     added = 0
     matched: List[str] = []
+    seen: set = set()
     for weight, keywords in _KEYWORD_WEIGHTS:
         for kw in keywords:
-            if kw in p:
+            if kw in tokens and kw not in seen:
                 added += weight
                 matched.append(kw)
+                seen.add(kw)
     return added, matched
 
 
@@ -271,12 +301,7 @@ def classify_file(path: str) -> FileClassification:
     added, matched = _score_keywords(path)
     score = min(_BASE_ANALYZE_SCORE + added, _RISK_SCORE_CAP)
     reasons = ["application_code"]
-    if matched:
-        # Stable, de-duplicated keyword reason list.
-        seen: dict = {}
-        for kw in matched:
-            seen[kw] = None
-        reasons.extend(f"keyword:{kw}" for kw in seen)
+    reasons.extend(f"keyword:{kw}" for kw in matched)
     return FileClassification(
         path=path,
         decision=Decision.ANALYZE,

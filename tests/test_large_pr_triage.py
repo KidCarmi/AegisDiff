@@ -207,7 +207,7 @@ def test_classifier_prioritizes_auth_paths():
         "src/login/handler.py",
         "internal/session/cookie.go",
         "api/jwt_token.py",
-        "lib/permissions.rb",
+        "lib/permission.rb",
         "rbac/resolver.ts",
     ]:
         c = classify_file(path)
@@ -219,7 +219,7 @@ def test_classifier_prioritizes_api_route_controller_handler_paths():
     base = _neutral_baseline_score()
     for path in [
         "web/app/api/users/route.ts",
-        "src/controllers/orders.py",
+        "src/orders/order_controller.py",
         "internal/handler/admin.go",
     ]:
         c = classify_file(path)
@@ -255,7 +255,7 @@ def test_classifier_prioritizes_upload_file_path_paths():
     base = _neutral_baseline_score()
     for path in [
         "src/upload/handler.py",
-        "lib/filesystem.go",
+        "lib/file_system.go",
         "web/lib/path_resolver.ts",
     ]:
         c = classify_file(path)
@@ -476,3 +476,92 @@ def test_file_classification_to_dict_round_trip():
     assert payload["decision"] == "analyze"
     assert payload["risk_score"] > 0
     assert isinstance(payload["reasons"], list)
+
+
+# ── Token-aware keyword matching — false-positive regressions ─────────────
+# These paths previously got an undeserved risk boost from substring
+# matching: "pathology" contains "path", "authors" contains "auth", etc.
+# After tokenisation they should no longer match the listed keyword.
+
+
+@pytest.mark.parametrize(
+    "path, forbidden_keyword",
+    [
+        ("src/pathology/model.py", "path"),
+        ("src/httparty_adapter.rb", "http"),
+        ("src/filecoin/client.py", "file"),
+        ("src/requested_feature/model.py", "request"),
+        ("src/authors/service.py", "auth"),
+    ],
+)
+def test_substring_lookalikes_do_not_match_keyword(path, forbidden_keyword):
+    c = classify_file(path)
+    # Still gets analyzed — these are normal application files.
+    assert c.decision == Decision.ANALYZE
+    # …but the false-positive keyword must not appear in the reasons list.
+    assert f"keyword:{forbidden_keyword}" not in c.reasons, (
+        f"{path} should not have been boosted by '{forbidden_keyword}'"
+    )
+
+
+def test_substring_lookalikes_do_not_inflate_risk_score():
+    # All five lookalike paths should score at the neutral baseline — they
+    # are application code with no real risk-keyword token.
+    base = _neutral_baseline_score()
+    for path in [
+        "src/pathology/model.py",
+        "src/httparty_adapter.rb",
+        "src/filecoin/client.py",
+        "src/requested_feature/model.py",
+        "src/authors/service.py",
+    ]:
+        c = classify_file(path)
+        assert c.risk_score == base, f"{path} should match the neutral baseline"
+
+
+# ── Token-aware keyword matching — positive matches still work ───────────
+
+
+def test_token_split_compound_user_file_matches_path_and_file():
+    c = classify_file("src/path/user_file.py")
+    assert c.decision == Decision.ANALYZE
+    assert "keyword:path" in c.reasons
+    assert "keyword:file" in c.reasons
+
+
+def test_token_split_compound_orders_controller_matches_api_and_controller():
+    c = classify_file("src/api/orders_controller.py")
+    assert c.decision == Decision.ANALYZE
+    assert "keyword:api" in c.reasons
+    assert "keyword:controller" in c.reasons
+
+
+def test_token_split_compound_env_loader_matches_config_and_env():
+    c = classify_file("src/config/env_loader.py")
+    assert c.decision == Decision.ANALYZE
+    assert "keyword:config" in c.reasons
+    assert "keyword:env" in c.reasons
+
+
+def test_simple_segment_paths_still_match():
+    # No compound names — just the keyword as a path segment.
+    c_http = classify_file("src/http/client.py")
+    assert "keyword:http" in c_http.reasons
+
+    c_auth = classify_file("src/auth/login.py")
+    assert "keyword:auth" in c_auth.reasons
+    assert "keyword:login" in c_auth.reasons
+
+
+def test_token_match_handles_dash_dot_and_mixed_case():
+    # Tokeniser must split on '-' and '.' too, and be case-insensitive.
+    c = classify_file("src/Auth-Service/Login.Handler.TS")
+    assert "keyword:auth" in c.reasons
+    assert "keyword:login" in c.reasons
+    assert "keyword:handler" in c.reasons
+
+
+def test_keyword_reasons_are_deduplicated():
+    # "auth" appears in two path segments; it should be reported exactly once.
+    c = classify_file("src/auth/auth_provider.py")
+    assert c.reasons.count("keyword:auth") == 1
