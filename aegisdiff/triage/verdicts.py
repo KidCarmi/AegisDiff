@@ -29,6 +29,28 @@ class Severity(str, Enum):
     NA = "N/A"
 
 
+# Shared severity ordering used everywhere we need to rank findings —
+# verdict aggregation in TriageEngine, inline-comment sorting in the
+# entrypoints, and any future rank-aware caller. Higher = worse / more
+# actionable. Single source of truth: do not duplicate this map.
+SEVERITY_RANK: dict = {
+    Severity.CRITICAL: 5,
+    Severity.HIGH: 4,
+    Severity.MEDIUM: 3,
+    Severity.LOW: 2,
+    Severity.INFO: 1,
+    Severity.NA: 0,
+}
+
+
+def severity_rank(severity: Severity) -> int:
+    """Return the canonical numeric rank for a ``Severity``.
+
+    Unknown values fall back to ``0`` (lowest priority) — never raises.
+    """
+    return SEVERITY_RANK.get(severity, 0)
+
+
 @dataclass
 class Verdict:
     verdict: VerdictType

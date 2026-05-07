@@ -129,9 +129,10 @@ def main() -> None:
     from .llm.providers.github_models import GitHubModelsProvider
     from .llm.providers.groq import GroqProvider
     from .llm.providers.openrouter import OpenRouterProvider
+    from .triage.budget import select_inline_findings
     from .triage.engine import TriageEngine
     from .triage.large_pr import detect_large_pr
-    from .triage.verdicts import Severity, VerdictType
+    from .triage.verdicts import VerdictType
 
     CHUNKED_DIFF_THRESHOLD = 100  # lines
 
@@ -288,25 +289,16 @@ def main() -> None:
         # Post an inline comment for every finding with a known sink line.
         # In Large PR Mode the count is capped at max_inline_comments and
         # CRITICAL/HIGH findings are posted first; the rest are reported in
-        # the top-level summary's coverage block.
-        inline_candidates = [v for v in all_verdicts if v.line_number and v.file_path]
-        inline_overflow = 0
+        # the top-level summary's coverage block. select_inline_findings()
+        # is the single source of truth for both the cap and the exact
+        # overflow count, so the two can never disagree.
         if large_pr_run is not None:
-            cap = max(0, int(detection.budgets.max_inline_comments))
-            inline_candidates.sort(
-                key=lambda v: (
-                    -{
-                        Severity.CRITICAL: 5,
-                        Severity.HIGH: 4,
-                        Severity.MEDIUM: 3,
-                        Severity.LOW: 2,
-                        Severity.INFO: 1,
-                        Severity.NA: 0,
-                    }.get(v.severity, 0)
-                )
+            inline_candidates, inline_overflow = select_inline_findings(
+                all_verdicts, detection.budgets.max_inline_comments
             )
-            inline_overflow = max(0, len(inline_candidates) - cap)
-            inline_candidates = inline_candidates[:cap]
+        else:
+            inline_candidates = [v for v in all_verdicts if v.line_number and v.file_path]
+            inline_overflow = 0
 
         any_inline_posted = False
         for v in inline_candidates:

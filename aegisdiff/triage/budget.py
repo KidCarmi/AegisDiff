@@ -9,10 +9,11 @@ report of what was skipped and why. No LLM calls, no I/O.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from .file_classifier import Decision, FileClassification
 from .large_pr import LargePRBudgets
+from .verdicts import Verdict, severity_rank
 
 # Stable skip-reason categories used in counters and coverage metadata.
 SKIP_REASON_DOCS = "docs"
@@ -134,3 +135,34 @@ def select_files_for_analysis(
         skip_reason_counts=skip_counts,
         budget_exhausted=budget_exhausted,
     )
+
+
+def select_inline_findings(
+    verdicts: List[Verdict],
+    max_inline_comments: int,
+) -> Tuple[List[Verdict], int]:
+    """Pick which findings should become inline PR review comments in
+    Large PR Risk Triage Mode, and report the exact overflow count.
+
+    A verdict is *eligible* to be an inline comment iff it has both a
+    ``file_path`` and a ``line_number`` — without those, the GitHub API
+    cannot post the comment on a specific line. Eligible verdicts are
+    sorted by ``severity_rank`` descending (CRITICAL first); ties keep
+    their original order so the result is deterministic.
+
+    Returns ``(selected, overflow)`` where:
+      * ``selected`` is the eligible-and-sorted list truncated to
+        ``max_inline_comments``.
+      * ``overflow`` is exactly
+        ``max(0, len(eligible) - max_inline_comments)``.
+
+    Findings that aren't eligible (no file/line) NEVER count toward
+    overflow — overflow only describes inline-comment-capable findings
+    that were dropped because of the cap.
+    """
+    cap = max(0, int(max_inline_comments))
+    eligible = [v for v in verdicts if v.line_number and v.file_path]
+    eligible.sort(key=lambda v: severity_rank(v.severity), reverse=True)
+    selected = eligible[:cap]
+    overflow = max(0, len(eligible) - cap)
+    return selected, overflow

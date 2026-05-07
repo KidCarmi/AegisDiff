@@ -32,6 +32,11 @@ class LargePRBudgets:
     max_llm_calls_per_pr: int = 40
     max_inline_comments: int = 10
     max_added_lines_per_chunk: int = 120
+    # Hard byte cap on each chunk fed to the LLM in Large PR Mode. Belt-and-
+    # braces over ``max_added_lines_per_chunk``: a chunk with many removed
+    # lines, long context, or weird metadata can still blow past a context
+    # window even when the line count is fine.
+    max_chunk_bytes: int = 32_000
 
 
 @dataclass

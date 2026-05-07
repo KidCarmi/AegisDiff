@@ -101,8 +101,10 @@ _TEST_FILE_RE = re.compile(
 )
 
 # ── Risk keyword scoring ──────────────────────────────────────────────────
-# Score is path-substring based, case-insensitive, deterministic. Each
-# matched keyword adds its weight; the total is capped at 100.
+# Score is path-token based, case-insensitive, deterministic. Each matched
+# keyword adds its weight; the total is capped at 100. See ``_tokenize``
+# below for the splitting rules — keywords match whole tokens only, never
+# arbitrary substrings (so ``pathology`` does not match ``path``).
 
 _BASE_ANALYZE_SCORE = 25  # neutral application file
 _BASE_DEPRIORITIZE_SCORE = 10  # test files

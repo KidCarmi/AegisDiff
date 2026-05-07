@@ -17,7 +17,7 @@ from .coverage import CoverageMetadata, build_coverage_metadata
 from .file_classifier import classify_files
 from .large_pr import LargePRDetection
 from .prompts import APPSEC_SYSTEM_PROMPT, LARGE_PR_PROMPT_ADDENDUM, build_user_message
-from .verdicts import Severity, Verdict, VerdictType, parse_verdict
+from .verdicts import SEVERITY_RANK, Verdict, VerdictType, parse_verdict
 
 logger = logging.getLogger(__name__)
 
@@ -53,14 +53,61 @@ _VERDICT_RANK = {
     VerdictType.ERROR: 1,
     VerdictType.FALSE_POSITIVE: 0,
 }
-_SEVERITY_RANK = {
-    Severity.CRITICAL: 5,
-    Severity.HIGH: 4,
-    Severity.MEDIUM: 3,
-    Severity.LOW: 2,
-    Severity.INFO: 1,
-    Severity.NA: 0,
-}
+# Severity ordering lives in ``verdicts.SEVERITY_RANK`` — single source of
+# truth shared with the entrypoints' inline-comment sorter.
+
+
+def _trim_chunk_to_byte_budget(chunk: str, max_bytes: int) -> Tuple[str, bool]:
+    """Trim a single-file diff chunk so its UTF-8 size fits ``max_bytes``.
+
+    Preserves the file header (everything up to and including the first
+    ``@@`` line) so the LLM still sees ``diff --git`` / ``--- a/`` / ``+++
+    b/`` / ``@@`` metadata and knows what file it's looking at. Body lines
+    are added one at a time until the next line would exceed the budget;
+    the trim point always falls on a line boundary so we never split a
+    UTF-8 codepoint or a half-line.
+
+    Returns ``(trimmed_chunk, was_trimmed)``. When the chunk already fits,
+    the original string is returned unchanged.
+
+    Edge case: if even the header alone exceeds ``max_bytes``, fall back
+    to a UTF-8-safe byte truncation of the whole chunk so we still send
+    *something* security-relevant rather than an empty prompt.
+    """
+    if max_bytes <= 0:
+        return chunk, False
+    encoded = chunk.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return chunk, False
+
+    lines = chunk.splitlines(keepends=True)
+    header_end = 0
+    for i, line in enumerate(lines):
+        if line.startswith("@@"):
+            header_end = i + 1
+            break
+
+    header = "".join(lines[:header_end])
+    body = lines[header_end:]
+
+    header_bytes = len(header.encode("utf-8"))
+    if header_bytes >= max_bytes:
+        # Pathological case — header alone is too big. Fall back to a
+        # byte-safe truncation of the whole chunk so the LLM still gets
+        # the most security-relevant prefix.
+        truncated = encoded[:max_bytes].decode("utf-8", errors="ignore")
+        return truncated, True
+
+    out = header
+    out_bytes = header_bytes
+    for line in body:
+        line_bytes = len(line.encode("utf-8"))
+        if out_bytes + line_bytes > max_bytes:
+            break
+        out += line
+        out_bytes += line_bytes
+
+    return out, True
 
 
 @dataclass
@@ -79,6 +126,7 @@ class LargePRRunResult:
     llm_calls_budget_used: int = 0
     llm_calls_budget_total: int = 0
     budget_exhausted: bool = False
+    chunks_trimmed: int = 0  # how many sub-chunks were byte-trimmed before LLM
 
 
 class TriageEngine:
@@ -274,7 +322,7 @@ class TriageEngine:
         def _rank(v: Verdict) -> Tuple[int, int, float]:
             return (
                 _VERDICT_RANK.get(v.verdict, 0),
-                _SEVERITY_RANK.get(v.severity, 0),
+                SEVERITY_RANK.get(v.severity, 0),
                 v.confidence,
             )
 
@@ -322,7 +370,9 @@ class TriageEngine:
 
         verdicts: List[Verdict] = []
         calls_used = 0
+        chunks_trimmed = 0
         budget_exhausted_calls = False
+        max_chunk_bytes = max(1, int(budgets.max_chunk_bytes))
 
         for cls in selection.selected:
             if calls_used >= max_llm_calls:
@@ -344,7 +394,7 @@ class TriageEngine:
             # Per-file chunk cap — protects budget on huge single files.
             sub_hunks = sub_hunks[: max(1, int(budgets.max_chunks_per_file))]
 
-            for hunk in sub_hunks:
+            for idx, hunk in enumerate(sub_hunks, start=1):
                 if calls_used >= max_llm_calls:
                     budget_exhausted_calls = True
                     logger.warning(
@@ -352,14 +402,22 @@ class TriageEngine:
                         cls.path,
                     )
                     break
+                trimmed_hunk, was_trimmed = _trim_chunk_to_byte_budget(hunk, max_chunk_bytes)
+                if was_trimmed:
+                    chunks_trimmed += 1
+                    logger.warning(
+                        "Large PR Mode: chunk for %s exceeded %d bytes — trimmed",
+                        cls.path,
+                        max_chunk_bytes,
+                    )
                 logger.info(
                     "Large PR Mode: analyzing %s (risk=%d, hunk %d/%d)",
                     cls.path,
                     cls.risk_score,
-                    sub_hunks.index(hunk) + 1,
+                    idx,
                     len(sub_hunks),
                 )
-                verdict = self.analyze_diff(hunk, large_pr_mode=True)
+                verdict = self.analyze_diff(trimmed_hunk, large_pr_mode=True)
                 verdicts.append(verdict)
                 calls_used += 1
 
@@ -378,6 +436,7 @@ class TriageEngine:
             llm_calls_budget_used=calls_used,
             llm_calls_budget_total=max_llm_calls,
             budget_exhausted=coverage_budget_exhausted,
+            chunks_trimmed=chunks_trimmed,
         )
 
     @staticmethod
