@@ -30,6 +30,13 @@ SKIP_REASON_MINIFIED = "minified"
 SKIP_REASON_DEPENDENCY_ONLY = "dependency_only"
 SKIP_REASON_BUDGET_EXHAUSTED = "budget_exhausted"
 SKIP_REASON_DEPRIORITIZED = "deprioritized_no_budget"
+# Files that were *selected* for analysis but never reached during the
+# Large PR Mode loop because the per-PR LLM-call budget
+# (max_llm_calls_per_pr) was exhausted first. Tracked separately from
+# SKIP_REASON_BUDGET_EXHAUSTED, which describes file-selection budget
+# exhaustion (max_files_analyzed). Reported by the engine after the loop
+# completes so the summary cannot overstate scan coverage.
+SKIP_REASON_BUDGET_EXHAUSTED_LLM_CALLS = "budget_exhausted_llm_calls"
 SKIP_REASON_OTHER = "other"
 
 # Map a primary classifier reason → canonical skip-reason bucket.

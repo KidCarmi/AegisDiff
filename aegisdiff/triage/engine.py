@@ -12,7 +12,11 @@ from typing import Dict, List, Optional, Tuple
 from ..code_context.extractor import CodeContextExtractor
 from ..llm.orchestrator import LLMOrchestrator
 from ..llm.providers.base import LLMRequest
-from .budget import SelectionResult, select_files_for_analysis
+from .budget import (
+    SKIP_REASON_BUDGET_EXHAUSTED_LLM_CALLS,
+    SelectionResult,
+    select_files_for_analysis,
+)
 from .coverage import CoverageMetadata, build_coverage_metadata
 from .file_classifier import classify_files
 from .large_pr import LargePRDetection
@@ -493,8 +497,11 @@ class TriageEngine:
           4. Total LLM calls are capped at ``max_llm_calls_per_pr``; if the
              budget is exhausted partway through, the run continues with
              whatever findings it has — it never fails analysis.
-          5. ``CoverageMetadata`` is built from the selection result so the
-             summary comment can report what was scanned vs. skipped.
+          5. ``CoverageMetadata`` is finalised *after* the loop from the
+             set of files that actually consumed at least one LLM call.
+             Selected files that the LLM-call budget cut off are reported
+             under the ``budget_exhausted_llm_calls`` skip-reason bucket,
+             so the summary cannot overstate scan coverage.
 
         SKIP files (docs / generated / assets / minified) and
         DEPENDENCY_ONLY files (lockfiles) are excluded from LLM analysis
@@ -511,6 +518,9 @@ class TriageEngine:
         diff_by_path: Dict[str, str] = {path: diff for path, diff in file_chunks}
         classifications = classify_files(list(diff_by_path.keys()))
         selection = select_files_for_analysis(classifications, budgets)
+        # Provisional coverage from the *planned* selection. Re-finalised
+        # after the loop using the set of files that actually got LLM
+        # calls — see the post-loop recompute below.
         coverage = build_coverage_metadata(detection, selection, files_changed=files_changed)
 
         verdicts: List[Verdict] = []
@@ -518,6 +528,10 @@ class TriageEngine:
         chunks_trimmed = 0
         budget_exhausted_calls = False
         max_chunk_bytes = max(1, int(budgets.max_chunk_bytes))
+        # Set of file paths that actually consumed >=1 LLM call. Drives
+        # the post-loop coverage recompute so we never claim a file was
+        # analyzed when the LLM-call budget cut us off first.
+        analyzed_paths: set = set()
 
         for cls in selection.selected:
             if calls_used >= max_llm_calls:
@@ -569,9 +583,28 @@ class TriageEngine:
                 )
                 verdicts.append(verdict)
                 calls_used += 1
+                analyzed_paths.add(cls.path)
 
             if budget_exhausted_calls:
                 break
+
+        # ── Recompute coverage from executed work, not planned selection ──
+        # A file counts as "analyzed" only if at least one of its chunks
+        # actually consumed an LLM call. Selected files we never reached
+        # (LLM-call budget exhausted, or empty file_diff edge case) are
+        # demoted to ``skipped`` under the ``budget_exhausted_llm_calls``
+        # bucket. files_changed is preserved from the original parse so
+        # analyzed + skipped reconciles back to it.
+        unreached = [c for c in selection.selected if c.path not in analyzed_paths]
+        unreached_count = len(unreached)
+
+        coverage.files_analyzed = len(analyzed_paths)
+        coverage.files_skipped = len(selection.skipped) + unreached_count
+        if unreached_count > 0:
+            coverage.skip_reasons[SKIP_REASON_BUDGET_EXHAUSTED_LLM_CALLS] = (
+                coverage.skip_reasons.get(SKIP_REASON_BUDGET_EXHAUSTED_LLM_CALLS, 0)
+                + unreached_count
+            )
 
         # Mark coverage as budget-exhausted if either selection or LLM-call
         # budget was hit during this run.

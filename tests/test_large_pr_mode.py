@@ -20,6 +20,8 @@ from aegisdiff.github.pr_comment import (
 )
 from aegisdiff.llm.orchestrator import LLMOrchestrator
 from aegisdiff.llm.providers.base import LLMRequest, LLMResponse
+from aegisdiff.triage.budget import SelectionResult, select_inline_findings
+from aegisdiff.triage.coverage import build_coverage_metadata
 from aegisdiff.triage.engine import LargePRRunResult, TriageEngine
 from aegisdiff.triage.large_pr import LargePRBudgets, detect_large_pr
 from aegisdiff.triage.prompts import APPSEC_SYSTEM_PROMPT, LARGE_PR_PROMPT_ADDENDUM
@@ -1181,3 +1183,204 @@ def test_large_pr_mode_user_message_never_exceeds_cap_under_pressure():
     assert len(sent.encode("utf-8")) <= budgets.max_user_message_bytes
     # Schema instruction always wins.
     assert "JSON verdict schema" in sent
+
+
+# ── Codex P1: coverage reflects executed work, not planned selection ──────
+
+
+def test_coverage_reflects_executed_work_when_llm_budget_exhausts_midrun():
+    """LLM-call budget cuts off mid-run: coverage must report only the
+    files that actually consumed an LLM call. The unreached files go
+    into a `budget_exhausted_llm_calls` skip-reason bucket so the
+    Large PR coverage block cannot overstate scan coverage.
+    """
+    # 5 high-risk files, but max_llm_calls_per_pr=2.
+    raw = _build_diff(num_files=5, lines_per_file=2, prefix="src/auth/h")
+    budgets = LargePRBudgets(
+        max_files_analyzed=5,
+        max_chunks_per_file=1,
+        max_added_lines_per_chunk=20,
+        max_llm_calls_per_pr=2,
+    )
+    detection = detect_large_pr(
+        changed_files=5,
+        added_lines=10,
+        total_diff_bytes=len(raw.encode("utf-8")),
+        budgets=budgets,
+    )
+    detection.is_large_pr = True
+    detection.reasons.append("forced for coverage-recompute test")
+
+    engine, orch = _make_engine_with_recording_orchestrator()
+    result = engine.analyze_diff_large_pr_mode(raw, detection)
+
+    # Only 2 LLM calls actually happened.
+    assert orch.complete.call_count == 2
+    assert result.llm_calls_budget_used == 2
+    assert result.budget_exhausted is True
+
+    # Coverage now reflects the *executed* work — exactly 2 files.
+    assert result.coverage.files_analyzed == 2, (
+        f"coverage overstated analyzed: got {result.coverage.files_analyzed}, expected 2"
+    )
+
+    # The 3 unreached files are demoted to skipped under the new bucket.
+    # files_changed = 5 → analyzed (2) + skipped (3) = 5.
+    assert result.coverage.files_changed == 5
+    assert result.coverage.files_skipped == 3
+    assert result.coverage.skip_reasons.get("budget_exhausted_llm_calls") == 3, (
+        f"skip_reasons missing the bucket: {result.coverage.skip_reasons}"
+    )
+
+    # The to_dict() payload reflects the recompute too.
+    payload = result.coverage.to_dict()
+    assert payload["files_analyzed"] == 2
+    assert payload["files_skipped"] == 3
+    assert payload["skip_reasons"]["budget_exhausted_llm_calls"] == 3
+
+
+def test_coverage_does_not_overstate_when_some_selected_files_get_no_llm_call():
+    """End-to-end: 26 selected files, 4-call budget. Coverage must say
+    files_analyzed=4 (not 26), and 22 must show under the new bucket."""
+    raw = _build_diff(num_files=26, lines_per_file=2, prefix="src/auth/h")
+    budgets = LargePRBudgets(
+        max_files_analyzed=26,
+        max_chunks_per_file=1,
+        max_added_lines_per_chunk=10,
+        max_llm_calls_per_pr=4,
+    )
+    detection = detect_large_pr(
+        changed_files=26,
+        added_lines=52,
+        total_diff_bytes=len(raw.encode("utf-8")),
+        budgets=budgets,
+    )
+
+    engine, orch = _make_engine_with_recording_orchestrator()
+    result = engine.analyze_diff_large_pr_mode(raw, detection)
+
+    assert orch.complete.call_count == 4
+    assert result.coverage.files_analyzed == 4
+    # 26 selected, 4 reached → 22 unreached.
+    assert result.coverage.skip_reasons.get("budget_exhausted_llm_calls") == 22
+
+
+def test_coverage_unchanged_when_full_budget_available():
+    """Sanity: if the LLM budget is generous enough to scan everything,
+    coverage matches the planned selection (no regression on the happy path)."""
+    raw = _build_diff(num_files=3, lines_per_file=2, prefix="src/auth/h")
+    budgets = LargePRBudgets(
+        max_files_analyzed=10,
+        max_chunks_per_file=1,
+        max_added_lines_per_chunk=10,
+        max_llm_calls_per_pr=10,
+    )
+    detection = detect_large_pr(
+        changed_files=3,
+        added_lines=6,
+        total_diff_bytes=len(raw.encode("utf-8")),
+        budgets=budgets,
+    )
+    detection.is_large_pr = True
+    detection.reasons.append("forced for happy-path coverage test")
+
+    engine, _ = _make_engine_with_recording_orchestrator()
+    result = engine.analyze_diff_large_pr_mode(raw, detection)
+    assert result.coverage.files_analyzed == 3
+    assert result.coverage.files_skipped == 0
+    assert result.coverage.skip_reasons.get("budget_exhausted_llm_calls") is None, (
+        "happy-path runs must not populate the LLM-budget skip bucket"
+    )
+    assert result.budget_exhausted is False
+
+
+# ── Codex P2: only successfully posted inline comments are counted ────────
+
+
+def test_format_large_pr_summary_uses_inline_findings_shown_verbatim():
+    """The summary block reports exactly the value passed in for
+    ``inline_findings_shown`` — it does NOT compute it itself, so an
+    entrypoint passing a ``posted_count`` smaller than the candidate
+    count produces an honest summary."""
+    coverage = build_coverage_metadata(
+        detect_large_pr(changed_files=30, added_lines=2_000, total_diff_bytes=600_000),
+        SelectionResult(),
+        files_changed=30,
+    )
+    block = format_large_pr_summary(
+        coverage,
+        llm_calls_used=5,
+        llm_calls_total=10,
+        inline_findings_shown=3,
+        inline_findings_overflow=2,
+    )
+    assert "Inline comments posted: **3**" in block
+    assert "+2 additional" in block
+
+
+def test_both_entrypoints_only_count_successful_inline_posts():
+    """Source-level guarantee: both entrypoints track an
+    ``inline_posted_count`` that is incremented only on
+    ``create_review() == True`` and pass that counter (not
+    ``len(inline_candidates)``) to ``format_large_pr_summary``.
+    """
+    import aegisdiff.app_entrypoint as app_ep
+    import aegisdiff.entrypoint as ep
+
+    for module in (ep, app_ep):
+        text = Path(module.__file__).read_text()
+        # Counter is declared and incremented from a successful post.
+        assert "inline_posted_count = 0" in text, f"{Path(module.__file__).name}: missing counter"
+        assert "inline_posted_count += 1" in text, (
+            f"{Path(module.__file__).name}: counter never incremented"
+        )
+        # Increment is gated on the post returning True.
+        assert "if posted:" in text, f"{Path(module.__file__).name}: increment not gated on posted"
+        # The summary uses the counter, NOT len(inline_candidates).
+        assert "inline_findings_shown=inline_posted_count" in text, (
+            f"{Path(module.__file__).name}: summary not wired to inline_posted_count"
+        )
+        assert "inline_findings_shown=len(inline_candidates)" not in text, (
+            f"{Path(module.__file__).name}: still uses len(inline_candidates) — Codex P2 not fixed"
+        )
+
+
+def test_inline_post_counter_logic_simulated():
+    """Direct simulation of the entrypoint inline loop with mixed
+    True/False results from create_review. The counter must reflect
+    only the True returns; any_inline_posted must require both
+    ``posted=True`` AND ``v is primary``.
+    """
+    crit = _verdict_with_line(Severity.CRITICAL, line=1)
+    high = _verdict_with_line(Severity.HIGH, line=2)
+    medium = _verdict_with_line(Severity.MEDIUM, line=3)
+    low = _verdict_with_line(Severity.LOW, line=4)
+    info = _verdict_with_line(Severity.INFO, line=5)
+    inline_candidates = [crit, high, medium, low, info]
+    primary = high  # the aggregated/primary verdict
+    # Simulate GitHub: high accepts, low rejects, others accept.
+    post_results = {1: True, 2: True, 3: False, 4: False, 5: True}
+
+    any_inline_posted = False
+    inline_posted_count = 0
+    for v in inline_candidates:
+        posted = post_results[v.line_number]
+        if posted:
+            inline_posted_count += 1
+            if v is primary:
+                any_inline_posted = True
+
+    # 3 posted out of 5 attempted.
+    assert inline_posted_count == 3
+    assert any_inline_posted is True
+
+
+def test_inline_overflow_independent_of_post_success():
+    """Overflow must remain a function of (eligible, cap) — never of
+    posted_count. A high reject rate must not change the overflow
+    figure surfaced in the summary.
+    """
+    eligible = [_verdict_with_line(Severity.HIGH, line=i + 1) for i in range(15)]  # 15 eligible
+    selected, overflow = select_inline_findings(eligible, max_inline_comments=10)
+    assert len(selected) == 10
+    assert overflow == 5  # still 5 regardless of how many of the 10 actually post

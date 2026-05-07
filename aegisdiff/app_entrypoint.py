@@ -333,7 +333,13 @@ def main() -> None:
         inline_candidates = [v for v in all_verdicts if v.line_number and v.file_path]
         inline_overflow = 0
 
+    # ``inline_posted_count`` counts only the inline reviews GitHub
+    # actually accepted (create_review() returns False on 422
+    # line-not-in-diff, rate-limit, etc.). The Large PR summary reports
+    # this number, not ``len(inline_candidates)``. ``inline_overflow``
+    # stays based on eligibility-vs-cap, not posting success.
     any_inline_posted = False
+    inline_posted_count = 0
     for v in inline_candidates:
         inline_body = format_inline_comment(v)
         posted = app_client.create_review(
@@ -346,8 +352,10 @@ def main() -> None:
             v.line_number,
             inline_body,
         )
-        if posted and v is verdict:
-            any_inline_posted = True
+        if posted:
+            inline_posted_count += 1
+            if v is verdict:
+                any_inline_posted = True
 
     tp_count = len([v for v in all_verdicts if v.verdict == VerdictType.TRUE_POSITIVE])
     if large_pr_run is not None:
@@ -355,7 +363,7 @@ def main() -> None:
             large_pr_run.coverage,
             llm_calls_used=large_pr_run.llm_calls_budget_used,
             llm_calls_total=large_pr_run.llm_calls_budget_total,
-            inline_findings_shown=len(inline_candidates),
+            inline_findings_shown=inline_posted_count,
             inline_findings_overflow=inline_overflow,
         )
     comment_body = format_summary_comment(
