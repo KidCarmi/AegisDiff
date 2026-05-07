@@ -999,3 +999,185 @@ def test_analyze_diff_ignores_max_user_message_bytes_when_not_large_pr_mode():
     sent = orch.complete.call_args.args[0].user_message
     assert "code context trimmed" not in sent  # cap silently ignored
     assert len(sent.encode("utf-8")) > 50_000
+
+
+# ── PR #4 final review: hard byte-cap contract ────────────────────────────
+
+
+def test_trim_user_message_enforces_cap_when_head_plus_tail_plus_marker_exceeds_cap():
+    """The exact bug the reviewer flagged: when head + tail + marker > cap,
+    the previous implementation returned all three. The fix must guarantee
+    the byte cap and preserve the schema instruction at the end of tail.
+    """
+    from aegisdiff.triage.engine import _trim_user_message_to_byte_budget
+
+    # 800-byte head + 800-byte tail + ~70-byte marker > 1000-byte cap.
+    head = "DIFF SUMMARY: " + ("h" * 760) + "\n<<<CODE>>>"
+    tail = "<<<END_CODE>>>\n\nReturn the JSON verdict schema exactly: " + ("t" * 730)
+    body = "x" * 50  # tiny code block — irrelevant
+    msg = head + body + tail
+    cap = 1_000
+
+    out, trimmed = _trim_user_message_to_byte_budget(msg, cap)
+    assert trimmed is True
+    # HARD CONTRACT — never larger than the cap.
+    assert len(out.encode("utf-8")) <= cap, (
+        f"contract violated: out={len(out.encode('utf-8'))} bytes, cap={cap}"
+    )
+    # The trailing schema instruction must survive — it's at the END of tail.
+    assert "JSON verdict schema" in out
+
+
+def test_trim_user_message_drops_marker_when_outer_regions_fit_without_it():
+    """When head + tail + marker > cap but head + tail <= cap, the marker
+    is the lowest-priority content and gets dropped first."""
+    from aegisdiff.triage.engine import _trim_user_message_to_byte_budget
+
+    head = "HEADER\n<<<CODE>>>"
+    tail = "<<<END_CODE>>>\nJSON verdict schema."
+    msg = head + ("x" * 5_000) + tail
+    cap = len(head.encode("utf-8")) + len(tail.encode("utf-8")) + 5  # < marker bytes
+
+    out, trimmed = _trim_user_message_to_byte_budget(msg, cap)
+    assert trimmed is True
+    assert len(out.encode("utf-8")) <= cap
+    assert "HEADER" in out
+    assert "JSON verdict schema" in out
+    # Marker dropped to fit — outer regions both intact.
+    assert "code context trimmed" not in out
+
+
+def test_trim_user_message_preserves_tail_intact_when_only_head_must_be_cut():
+    """When head + tail > cap but tail alone fits, tail (which carries
+    the schema instruction) must be preserved verbatim."""
+    from aegisdiff.triage.engine import _trim_user_message_to_byte_budget
+
+    big_head = "DIFF SUMMARY: " + ("h" * 5_000) + "\n<<<CODE>>>"
+    tail = "<<<END_CODE>>>\nReturn the JSON verdict schema exactly. END."
+    msg = big_head + ("x" * 100) + tail
+    cap = len(tail.encode("utf-8")) + 200  # tail fits, but head + tail does not
+
+    out, trimmed = _trim_user_message_to_byte_budget(msg, cap)
+    assert trimmed is True
+    assert len(out.encode("utf-8")) <= cap
+    # Tail must appear *verbatim and complete* — schema instruction is sacred.
+    assert tail in out
+    # The very last bytes of the message are the tail.
+    assert out.endswith("END.")
+
+
+def test_trim_user_message_keeps_schema_when_tail_alone_exceeds_cap():
+    """Pathological: tail alone is bigger than the whole budget. We must
+    still respect the cap and preserve the END of the tail (where the
+    JSON-schema instruction lives)."""
+    from aegisdiff.triage.engine import _trim_user_message_to_byte_budget
+
+    head = "H\n<<<CODE>>>"
+    # Long tail; the schema instruction is at the very end.
+    tail = "<<<END_CODE>>>\n" + ("noise " * 1_000) + "JSON verdict schema."
+    msg = head + "code" + tail
+    cap = 200  # smaller than tail alone
+
+    out, trimmed = _trim_user_message_to_byte_budget(msg, cap)
+    assert trimmed is True
+    assert len(out.encode("utf-8")) <= cap
+    # End of tail (schema instruction) must survive.
+    assert "JSON verdict schema." in out
+
+
+def test_trim_user_message_zero_budget_does_not_overflow():
+    """Defensive: a zero / negative budget is a no-op. The original is
+    returned and the caller can decide whether that is acceptable."""
+    from aegisdiff.triage.engine import _trim_user_message_to_byte_budget
+
+    msg = "anything"
+    out, trimmed = _trim_user_message_to_byte_budget(msg, 0)
+    assert (out, trimmed) == (msg, False)
+    out, trimmed = _trim_user_message_to_byte_budget(msg, -1)
+    assert (out, trimmed) == (msg, False)
+
+
+def test_trim_user_message_no_markers_path_respects_cap():
+    """When there are no <<<CODE>>>/<<<END_CODE>>> markers at all, the
+    head+tail fallback must still respect the cap."""
+    from aegisdiff.triage.engine import _trim_user_message_to_byte_budget
+
+    msg = "BEGIN: " + ("x" * 100_000) + " :END schema"
+    cap = 500
+    out, trimmed = _trim_user_message_to_byte_budget(msg, cap)
+    assert trimmed is True
+    assert len(out.encode("utf-8")) <= cap
+
+
+@pytest.mark.parametrize(
+    "head_pad,tail_pad,cap",
+    [
+        (5_000, 5_000, 100),  # both regions far over cap
+        (50, 50, 80),  # head + tail + marker barely over cap
+        (1, 1, 200),  # tiny everything but absurd cap-check
+        (200, 100_000, 1_000),  # huge tail dominates
+        (100_000, 200, 1_000),  # huge head dominates
+    ],
+)
+def test_trim_user_message_hard_contract_holds_under_pressure(head_pad, tail_pad, cap):
+    """Property test — across many shapes of oversized message, the byte
+    cap is *never* violated."""
+    from aegisdiff.triage.engine import _trim_user_message_to_byte_budget
+
+    head = "DIFF SUMMARY:" + "h" * head_pad + "<<<CODE>>>"
+    tail = "<<<END_CODE>>>" + "t" * tail_pad + "JSON verdict schema."
+    msg = head + "code-content" + tail
+
+    out, trimmed = _trim_user_message_to_byte_budget(msg, cap)
+    assert len(out.encode("utf-8")) <= cap, (
+        f"cap violated: out={len(out.encode('utf-8'))}, cap={cap}, "
+        f"head_pad={head_pad}, tail_pad={tail_pad}"
+    )
+    if len(msg.encode("utf-8")) > cap:
+        assert trimmed is True
+
+
+def test_large_pr_mode_user_message_never_exceeds_cap_under_pressure():
+    """End-to-end: even when the extractor produces a wildly oversized
+    user_message AND the structural markers are deeply buried, the LLM
+    request still respects the cap."""
+    raw = _build_diff(num_files=26, lines_per_file=2, prefix="src/auth/h")
+    budgets = LargePRBudgets(
+        max_files_analyzed=1,
+        max_chunks_per_file=1,
+        max_added_lines_per_chunk=10,
+        max_chunk_bytes=32_000,
+        max_user_message_bytes=2_000,  # tight cap
+        max_llm_calls_per_pr=1,
+    )
+    detection = detect_large_pr(
+        changed_files=26,
+        added_lines=200,
+        total_diff_bytes=len(raw.encode("utf-8")),
+        budgets=budgets,
+    )
+
+    import aegisdiff.triage.engine as eng
+
+    real_build = eng.build_user_message
+
+    def _giant_build(context):
+        # Outer head + tail ALONE exceed the cap to trigger the fallback.
+        return (
+            "DIFF SUMMARY: " + ("h" * 5_000) + "\n"
+            "<<<CODE>>>\n" + ("c" * 5_000) + "<<<END_CODE>>>\n"
+            "Tail noise: " + ("t" * 5_000) + "JSON verdict schema exactly."
+        )
+
+    eng.build_user_message = _giant_build
+    try:
+        engine, orch = _make_engine_with_recording_orchestrator()
+        engine.analyze_diff_large_pr_mode(raw, detection)
+    finally:
+        eng.build_user_message = real_build
+
+    assert orch.complete.call_count == 1
+    sent = orch.complete.call_args.args[0].user_message
+    assert len(sent.encode("utf-8")) <= budgets.max_user_message_bytes
+    # Schema instruction always wins.
+    assert "JSON verdict schema" in sent

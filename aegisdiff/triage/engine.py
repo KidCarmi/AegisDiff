@@ -113,24 +113,42 @@ def _trim_chunk_to_byte_budget(chunk: str, max_bytes: int) -> Tuple[str, bool]:
 def _trim_user_message_to_byte_budget(user_message: str, max_bytes: int) -> Tuple[str, bool]:
     """Trim a Large PR Mode ``LLMRequest.user_message`` to fit ``max_bytes``.
 
+    Hard contract: the returned string's UTF-8 byte length is *always*
+    ``<= max_bytes`` (when ``max_bytes > 0``). The function never returns
+    a message larger than the cap, even in pathological cases.
+
     The user_message produced by ``build_user_message`` has three regions:
 
-      1. **Header** — DIFF SUMMARY, CHANGED FILES, DATA FLOW PATH list. Ends
-         just before the ``<<<CODE>>>`` marker.
+      1. **Header** — DIFF SUMMARY, CHANGED FILES, DATA FLOW PATH list.
+         Ends just before the ``<<<CODE>>>`` marker.
       2. **Code block** — imported definitions + raw diff snippet +
          surrounding context. Lives between ``<<<CODE>>>`` and
          ``<<<END_CODE>>>``. This is the only region that may be
-         shortened — it's the part that scales with the diff size.
+         shortened first — it's the part that scales with the diff.
       3. **Trailing instruction** — everything after ``<<<END_CODE>>>``,
-         including the JSON schema reminder. Critical for verdict
-         formatting; must always survive intact.
+         including the JSON-schema reminder. Critical for verdict
+         formatting and preserved as long as the cap allows.
 
-    Strategy: keep regions 1 and 3 verbatim, byte-truncate region 2 (on
-    a UTF-8-safe boundary) until the total fits. A short marker is
-    inserted so the model can tell the context was clipped.
+    Trim priority (most → least preserved):
 
-    If the message has no ``<<<CODE>>>`` markers (unexpected), fall back
-    to a head+tail byte split that preserves the start and the end.
+        trailing schema instruction (region 3 tail-end)
+            > header (region 1)
+            > "[code context trimmed]" marker
+            > code block (region 2)
+
+    Strategy:
+      * Normal case (``head + tail + marker <= max_bytes``): keep both
+        outer regions verbatim and byte-truncate the inner code on a
+        UTF-8-safe boundary.
+      * Outer regions too big for the marker: drop the marker and try to
+        keep ``head + tail``.
+      * ``head + tail`` still too big but ``tail <= max_bytes``: keep
+        the tail intact (schema instruction is sacred), trim the head.
+      * Even the tail alone exceeds the cap: keep the *end* of the tail
+        (where the schema instruction lives), drop everything else.
+
+    A final byte-level safety net always re-clips the result so the
+    contract holds regardless of UTF-8 boundary rounding.
 
     Returns ``(trimmed, was_trimmed)``. Original is returned unchanged
     when it already fits.
@@ -149,43 +167,66 @@ def _trim_user_message_to_byte_budget(user_message: str, max_bytes: int) -> Tupl
     marker_bytes = len(marker.encode("utf-8"))
 
     if open_idx == -1 or close_idx == -1 or close_idx < open_idx:
-        # No markers — keep the head and the tail so trailing instructions
-        # survive even though we couldn't isolate the code block.
+        # No structural markers — keep head + tail so the trailing
+        # schema instruction (likely at the very end) survives.
         encoded = user_message.encode("utf-8")
         budget = max(0, max_bytes - marker_bytes)
         half = budget // 2
-        head = encoded[:half]
-        tail = encoded[-half:] if half > 0 else b""
-        return (
-            head.decode("utf-8", errors="ignore") + marker + tail.decode("utf-8", errors="ignore"),
-            True,
+        head_bytes_no_marker = encoded[:half]
+        tail_bytes_no_marker = encoded[-half:] if half > 0 else b""
+        result = (
+            head_bytes_no_marker.decode("utf-8", errors="ignore")
+            + marker
+            + tail_bytes_no_marker.decode("utf-8", errors="ignore")
         )
+    else:
+        # Region 1 ends at the open marker (inclusive).
+        head = user_message[: open_idx + len(code_open)]
+        # Region 3 starts at the close marker (inclusive) and runs to EOF.
+        tail = user_message[close_idx:]
+        head_b = len(head.encode("utf-8"))
+        tail_b = len(tail.encode("utf-8"))
 
-    # Region 1 ends at the open marker (inclusive).
-    head = user_message[: open_idx + len(code_open)]
-    # Region 3 starts at the close marker (inclusive).
-    tail = user_message[close_idx:]
-    head_bytes = len(head.encode("utf-8"))
-    tail_bytes = len(tail.encode("utf-8"))
+        available_for_code = max_bytes - head_b - tail_b - marker_bytes
 
-    available_for_code = max_bytes - head_bytes - tail_bytes - marker_bytes
-    code_section = user_message[open_idx + len(code_open) : close_idx]
+        if available_for_code > 0:
+            # Normal case — only the inner code block is shortened.
+            code_section = user_message[open_idx + len(code_open) : close_idx]
+            code_encoded = code_section.encode("utf-8")
+            if len(code_encoded) <= available_for_code:
+                result = head + code_section + marker + tail
+            else:
+                truncated_code = code_encoded[:available_for_code].decode("utf-8", errors="ignore")
+                result = head + truncated_code + marker + tail
+        elif head_b + tail_b <= max_bytes:
+            # Drop the marker to make room; keep both outer regions.
+            result = head + tail
+        elif tail_b <= max_bytes:
+            # Tail (with the schema instruction) is sacred — preserve it
+            # whole and trim the head from its end. Losing the trailing
+            # ``<<<CODE>>>`` marker is fine; the model still has the
+            # schema in the tail.
+            head_budget = max_bytes - tail_b
+            if head_budget > 0:
+                head_truncated = head.encode("utf-8")[:head_budget].decode("utf-8", errors="ignore")
+                result = head_truncated + tail
+            else:
+                result = tail
+        else:
+            # Pathological: even the tail alone exceeds the cap. Keep the
+            # *end* of the tail so the schema instruction still survives,
+            # and drop everything else.
+            result = tail.encode("utf-8")[-max_bytes:].decode("utf-8", errors="ignore")
 
-    if available_for_code <= 0:
-        # Header + tail + marker already exceed budget. Send the cleanly
-        # framed head + marker + tail anyway — the schema instruction in
-        # ``tail`` is non-negotiable, even if total bytes still spill.
-        return head + marker + tail, True
+    # Hard cap enforcement — final safety net. Any UTF-8 rounding or
+    # corner case in the structured trimming above is clipped to the
+    # contract. We trim from the start so the trailing schema instruction
+    # (the highest-priority content) survives even at the absolute floor.
+    encoded = result.encode("utf-8")
+    if len(encoded) > max_bytes:
+        result = encoded[-max_bytes:].decode("utf-8", errors="ignore")
 
-    code_encoded = code_section.encode("utf-8")
-    if len(code_encoded) <= available_for_code:
-        # Code already fits — but the whole message didn't, which means
-        # head/tail dominate. Return head+code+marker+tail; if still over,
-        # caller (logger) just records the warning. Cleanest framing.
-        return head + code_section + marker + tail, True
-
-    truncated_code = code_encoded[:available_for_code].decode("utf-8", errors="ignore")
-    return head + truncated_code + marker + tail, True
+    return result, True
 
 
 @dataclass
