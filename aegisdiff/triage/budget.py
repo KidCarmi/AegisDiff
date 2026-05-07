@@ -9,10 +9,18 @@ report of what was skipped and why. No LLM calls, no I/O.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from .file_classifier import Decision, FileClassification
 from .large_pr import LargePRBudgets
+from .verdicts import Verdict, VerdictType, severity_rank
+
+# Verdict types that are eligible to become inline PR review comments.
+# FALSE_POSITIVE is excluded — surfacing "this is fine" inline would be
+# pure noise on every line of a large PR. ERROR is excluded too: an engine
+# failure on one chunk should not pin a comment on a random line; it
+# belongs in the summary instead.
+_INLINE_ACTIONABLE_VERDICTS = frozenset({VerdictType.TRUE_POSITIVE, VerdictType.NEEDS_REVIEW})
 
 # Stable skip-reason categories used in counters and coverage metadata.
 SKIP_REASON_DOCS = "docs"
@@ -22,6 +30,13 @@ SKIP_REASON_MINIFIED = "minified"
 SKIP_REASON_DEPENDENCY_ONLY = "dependency_only"
 SKIP_REASON_BUDGET_EXHAUSTED = "budget_exhausted"
 SKIP_REASON_DEPRIORITIZED = "deprioritized_no_budget"
+# Files that were *selected* for analysis but never reached during the
+# Large PR Mode loop because the per-PR LLM-call budget
+# (max_llm_calls_per_pr) was exhausted first. Tracked separately from
+# SKIP_REASON_BUDGET_EXHAUSTED, which describes file-selection budget
+# exhaustion (max_files_analyzed). Reported by the engine after the loop
+# completes so the summary cannot overstate scan coverage.
+SKIP_REASON_BUDGET_EXHAUSTED_LLM_CALLS = "budget_exhausted_llm_calls"
 SKIP_REASON_OTHER = "other"
 
 # Map a primary classifier reason → canonical skip-reason bucket.
@@ -134,3 +149,44 @@ def select_files_for_analysis(
         skip_reason_counts=skip_counts,
         budget_exhausted=budget_exhausted,
     )
+
+
+def select_inline_findings(
+    verdicts: List[Verdict],
+    max_inline_comments: int,
+) -> Tuple[List[Verdict], int]:
+    """Pick which findings should become inline PR review comments in
+    Large PR Risk Triage Mode, and report the exact overflow count.
+
+    Eligibility (all must be true):
+      * ``verdict.verdict`` is one of TRUE_POSITIVE or NEEDS_REVIEW —
+        FALSE_POSITIVE and ERROR are deliberately excluded so we never
+        spam reviewers with "this is fine" comments or pin engine errors
+        to a random line.
+      * ``verdict.file_path`` is set.
+      * ``verdict.line_number`` is set.
+
+    Eligible verdicts are sorted by ``severity_rank`` descending
+    (CRITICAL first). Ties keep their original order so the result is
+    deterministic.
+
+    Returns ``(selected, overflow)`` where:
+      * ``selected`` is the eligible-and-sorted list truncated to
+        ``max_inline_comments``.
+      * ``overflow`` is exactly
+        ``max(0, len(eligible) - max_inline_comments)``.
+
+    Findings that aren't eligible — wrong verdict type, missing file/
+    line — NEVER count toward overflow. Overflow only describes inline-
+    comment-capable findings that were dropped because of the cap.
+    """
+    cap = max(0, int(max_inline_comments))
+    eligible = [
+        v
+        for v in verdicts
+        if v.verdict in _INLINE_ACTIONABLE_VERDICTS and v.line_number and v.file_path
+    ]
+    eligible.sort(key=lambda v: severity_rank(v.severity), reverse=True)
+    selected = eligible[:cap]
+    overflow = max(0, len(eligible) - cap)
+    return selected, overflow

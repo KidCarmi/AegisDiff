@@ -12,9 +12,18 @@ The HTML marker <!-- aegisdiff-report --> is used for idempotent upsert.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional
 
+from ..triage.coverage import CoverageMetadata
 from ..triage.verdicts import Severity, Verdict, VerdictType
+
+# Mandated wording for the Large PR Risk Triage Mode summary block. Phase 2
+# tests assert this string appears verbatim in the summary comment.
+LARGE_PR_BANNER = (
+    "AegisDiff ran in Large PR Risk Triage Mode. "
+    "This PR exceeded the full-scan budget, so AegisDiff prioritized "
+    "security-relevant changed hunks instead of scanning every line."
+)
 
 # HTML marker used to find and update the comment on subsequent pushes
 COMMENT_MARKER = "<!-- aegisdiff-report -->"
@@ -36,12 +45,62 @@ VERDICT_EMOJI = {
 }
 
 
+def format_large_pr_summary(
+    coverage: CoverageMetadata,
+    llm_calls_used: int,
+    llm_calls_total: int,
+    inline_findings_shown: Optional[int] = None,
+    inline_findings_overflow: Optional[int] = None,
+) -> str:
+    """Build the Large PR Risk Triage Mode block for the summary comment.
+
+    Includes the mandated Phase 2 banner sentence verbatim, followed by a
+    coverage table and budget usage. Returns an empty string when
+    ``coverage`` is ``None`` so callers can append unconditionally.
+    """
+    if coverage is None:
+        return ""
+
+    skip_lines: List[str] = []
+    for reason in sorted(coverage.skip_reasons.keys()):
+        skip_lines.append(f"  - `{reason}`: {coverage.skip_reasons[reason]}")
+    skip_block = "\n".join(skip_lines) if skip_lines else "  - (none)"
+
+    reasons = "; ".join(coverage.large_pr_reasons) if coverage.large_pr_reasons else "(unknown)"
+    budget_state = "yes" if coverage.budget_exhausted else "no"
+
+    inline_line = ""
+    if inline_findings_shown is not None:
+        overflow = inline_findings_overflow or 0
+        inline_line = f"\n- Inline comments posted: **{inline_findings_shown}**" + (
+            f" (+{overflow} additional findings in summary only)" if overflow > 0 else ""
+        )
+
+    return f"""
+<details><summary>📦 Large PR Risk Triage Mode coverage</summary>
+
+> {LARGE_PR_BANNER}
+
+- Files changed: **{coverage.files_changed}**
+- Files analyzed: **{coverage.files_analyzed}**
+- Files skipped: **{coverage.files_skipped}**
+- Skip reasons:
+{skip_block}
+- LLM calls used: **{llm_calls_used} / {llm_calls_total}**
+- Budget exhausted: **{budget_state}**
+- Large PR triggers: {reasons}{inline_line}
+
+</details>
+"""
+
+
 def format_summary_comment(
     verdict: Verdict,
     pr_number: int,
     sha: str,
     inline_posted: bool = False,
     total_findings: Optional[int] = None,
+    large_pr_summary: Optional[str] = None,
 ) -> str:
     """
     Top-level PR comment: verdict table + summary.
@@ -98,6 +157,8 @@ def format_summary_comment(
         else ""
     )
 
+    large_pr_block = large_pr_summary or ""
+
     return f"""{COMMENT_MARKER}
 ## {vrd_icon} AegisDiff Security Triage — `{verdict.verdict.value}`
 
@@ -113,7 +174,7 @@ def format_summary_comment(
 **{verdict.title}**
 
 {verdict.summary}
-{findings_note}{inline_note}{detail_section}
+{findings_note}{inline_note}{detail_section}{large_pr_block}
 <sub>Commit `{sha}` · PR #{pr_number} · Powered by [AegisDiff](https://github.com/KidCarmi/AegisDiff)</sub>
 """
 

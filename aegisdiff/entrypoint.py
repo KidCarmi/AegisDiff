@@ -12,6 +12,7 @@ import logging
 import os
 import sys
 from pathlib import Path
+from typing import Optional
 
 import httpx
 
@@ -120,6 +121,7 @@ def main() -> None:
     from .github.pr_comment import (
         COMMENT_MARKER,
         format_inline_comment,
+        format_large_pr_summary,
         format_summary_comment,
         format_verdict_comment,
     )
@@ -127,7 +129,9 @@ def main() -> None:
     from .llm.providers.github_models import GitHubModelsProvider
     from .llm.providers.groq import GroqProvider
     from .llm.providers.openrouter import OpenRouterProvider
+    from .triage.budget import select_inline_findings
     from .triage.engine import TriageEngine
+    from .triage.large_pr import detect_large_pr
     from .triage.verdicts import VerdictType
 
     CHUNKED_DIFF_THRESHOLD = 100  # lines
@@ -227,8 +231,40 @@ def main() -> None:
 
     t0 = time.monotonic()
     diff_lines = raw_diff.count("\n")
+    added_lines = sum(
+        1 for line in raw_diff.splitlines() if line.startswith("+") and not line.startswith("+++")
+    )
+    file_chunks = TriageEngine._split_diff_by_file(raw_diff)
+    total_diff_bytes = len(raw_diff.encode("utf-8"))
+    detection = detect_large_pr(
+        changed_files=len(file_chunks),
+        added_lines=added_lines,
+        total_diff_bytes=total_diff_bytes,
+    )
 
-    if diff_lines > CHUNKED_DIFF_THRESHOLD:
+    large_pr_summary_block: Optional[str] = None
+    large_pr_run = None
+
+    if detection.is_large_pr:
+        logger.info(
+            "Large PR Risk Triage Mode — files=%d added=%d bytes=%d reasons=%s",
+            len(file_chunks),
+            added_lines,
+            total_diff_bytes,
+            detection.reasons,
+        )
+        large_pr_run = engine.analyze_diff_large_pr_mode(raw_diff, detection)
+        all_verdicts = large_pr_run.verdicts
+        verdict = TriageEngine.aggregate_verdicts(all_verdicts)
+        logger.info(
+            "Large PR Mode: %d/%d LLM call(s) used, exhausted=%s, primary=%s [%s]",
+            large_pr_run.llm_calls_budget_used,
+            large_pr_run.llm_calls_budget_total,
+            large_pr_run.budget_exhausted,
+            verdict.verdict.value,
+            verdict.severity.value,
+        )
+    elif diff_lines > CHUNKED_DIFF_THRESHOLD:
         logger.info("Large diff (%d lines) — using per-file chunked analysis", diff_lines)
         all_verdicts = engine.analyze_diff_chunked(raw_diff)
         verdict = TriageEngine.aggregate_verdicts(all_verdicts)
@@ -251,32 +287,61 @@ def main() -> None:
 
         # ── Inline review comments ───────────────────────────────────────
         # Post an inline comment for every finding with a known sink line.
-        # In chunked mode this can produce multiple inline comments (one per
-        # vulnerable file). In single-verdict mode at most one is posted.
+        # In Large PR Mode the count is capped at max_inline_comments and
+        # CRITICAL/HIGH findings are posted first; the rest are reported in
+        # the top-level summary's coverage block. select_inline_findings()
+        # is the single source of truth for both the cap and the exact
+        # overflow count, so the two can never disagree.
+        if large_pr_run is not None:
+            inline_candidates, inline_overflow = select_inline_findings(
+                all_verdicts, detection.budgets.max_inline_comments
+            )
+        else:
+            inline_candidates = [v for v in all_verdicts if v.line_number and v.file_path]
+            inline_overflow = 0
+
+        # ``inline_posted_count`` only counts inline reviews GitHub actually
+        # accepted (create_review() returns False on 422 line-not-in-diff,
+        # rate-limit, etc.). The Large PR summary reports this number, not
+        # ``len(inline_candidates)``, so the coverage block reflects what
+        # was truly surfaced inline. ``inline_overflow`` is intentionally
+        # *not* derived from this counter — overflow is about eligibility-
+        # vs-cap, not posting success.
         any_inline_posted = False
-        for v in all_verdicts:
-            if v.line_number and v.file_path:
-                inline_body = format_inline_comment(v)
-                posted = client.create_review(
-                    cfg.pr_number,
-                    cfg.commit_sha,
-                    v.file_path,
-                    v.line_number,
-                    inline_body,
-                )
-                if posted and v is verdict:
+        inline_posted_count = 0
+        for v in inline_candidates:
+            inline_body = format_inline_comment(v)
+            posted = client.create_review(
+                cfg.pr_number,
+                cfg.commit_sha,
+                v.file_path,
+                v.line_number,
+                inline_body,
+            )
+            if posted:
+                inline_posted_count += 1
+                if v is verdict:
                     any_inline_posted = True
 
         # ── Top-level summary comment ────────────────────────────────────
         # Always posted. Based on the primary (most severe) verdict.
         # When inline succeeded for the primary finding, omits evidence.
         extra_count = len([v for v in all_verdicts if v.verdict == VerdictType.TRUE_POSITIVE])
+        if large_pr_run is not None:
+            large_pr_summary_block = format_large_pr_summary(
+                large_pr_run.coverage,
+                llm_calls_used=large_pr_run.llm_calls_budget_used,
+                llm_calls_total=large_pr_run.llm_calls_budget_total,
+                inline_findings_shown=inline_posted_count,
+                inline_findings_overflow=inline_overflow,
+            )
         comment_body = format_summary_comment(
             verdict,
             pr_number=cfg.pr_number,
             sha=sha_short,
             inline_posted=any_inline_posted,
             total_findings=extra_count if extra_count > 1 else None,
+            large_pr_summary=large_pr_summary_block,
         )
         client.upsert_pr_comment(cfg.pr_number, comment_body, COMMENT_MARKER)
 
