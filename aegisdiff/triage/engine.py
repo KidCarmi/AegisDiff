@@ -5,13 +5,18 @@ from __future__ import annotations
 import logging
 import re
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from ..code_context.extractor import CodeContextExtractor
 from ..llm.orchestrator import LLMOrchestrator
 from ..llm.providers.base import LLMRequest
-from .prompts import APPSEC_SYSTEM_PROMPT, build_user_message
+from .budget import SelectionResult, select_files_for_analysis
+from .coverage import CoverageMetadata, build_coverage_metadata
+from .file_classifier import classify_files
+from .large_pr import LargePRDetection
+from .prompts import APPSEC_SYSTEM_PROMPT, LARGE_PR_PROMPT_ADDENDUM, build_user_message
 from .verdicts import Severity, Verdict, VerdictType, parse_verdict
 
 logger = logging.getLogger(__name__)
@@ -58,6 +63,24 @@ _SEVERITY_RANK = {
 }
 
 
+@dataclass
+class LargePRRunResult:
+    """Per-run output of ``analyze_diff_large_pr_mode``.
+
+    The verdicts list and selection mirror the chunked path so callers can
+    still aggregate / fan out inline comments, but a Large PR run also
+    carries the coverage metadata + LLM-budget tracking that the summary
+    comment reports back to reviewers.
+    """
+
+    verdicts: List[Verdict] = field(default_factory=list)
+    coverage: Optional[CoverageMetadata] = None
+    selection: Optional[SelectionResult] = None
+    llm_calls_budget_used: int = 0
+    llm_calls_budget_total: int = 0
+    budget_exhausted: bool = False
+
+
 class TriageEngine:
     """
     Orchestrates the full analysis pipeline:
@@ -83,9 +106,16 @@ class TriageEngine:
         self._file_cache = file_cache or {}
         self._file_fetcher = file_fetcher
 
-    def analyze_diff(self, raw_diff: str) -> Verdict:
+    def analyze_diff(self, raw_diff: str, large_pr_mode: bool = False) -> Verdict:
         """
         Analyze a unified diff and return a security verdict.
+
+        Args:
+            raw_diff: A unified diff fragment (typically a single file or hunk).
+            large_pr_mode: When True, the Large PR Risk Triage Mode addendum
+                is appended to the system prompt so the model only flags
+                vulnerabilities actually introduced or exposed by the PR.
+                The verdict JSON schema is unchanged.
 
         Returns:
             Verdict — always returns a value, never raises.
@@ -128,8 +158,12 @@ class TriageEngine:
                     )
                     return v
 
+            system_prompt = APPSEC_SYSTEM_PROMPT
+            if large_pr_mode:
+                system_prompt = APPSEC_SYSTEM_PROMPT + LARGE_PR_PROMPT_ADDENDUM
+
             request = LLMRequest(
-                system_prompt=APPSEC_SYSTEM_PROMPT,
+                system_prompt=system_prompt,
                 user_message=build_user_message(context),
                 max_tokens=1024,
                 temperature=0.05,  # Near-deterministic for security verdicts
@@ -245,6 +279,106 @@ class TriageEngine:
             )
 
         return max(verdicts, key=_rank)
+
+    def analyze_diff_large_pr_mode(
+        self,
+        raw_diff: str,
+        detection: LargePRDetection,
+    ) -> LargePRRunResult:
+        """Run analysis under Large PR Risk Triage Mode.
+
+        The full ``raw_diff`` is NEVER sent to the LLM as a single prompt.
+        Instead:
+          1. The diff is split per-file using the existing
+             ``_split_diff_by_file`` helper (no API calls).
+          2. Files are classified + risk-scored (Phase 1 helpers) and
+             selected within ``budgets.max_files_analyzed``.
+          3. Each selected file is split into sub-chunks of
+             ``max_added_lines_per_chunk`` lines via the existing
+             ``_split_file_diff_into_hunks`` helper, capped at
+             ``max_chunks_per_file`` per file.
+          4. Total LLM calls are capped at ``max_llm_calls_per_pr``; if the
+             budget is exhausted partway through, the run continues with
+             whatever findings it has — it never fails analysis.
+          5. ``CoverageMetadata`` is built from the selection result so the
+             summary comment can report what was scanned vs. skipped.
+
+        SKIP files (docs / generated / assets / minified) and
+        DEPENDENCY_ONLY files (lockfiles) are excluded from LLM analysis
+        entirely. DEPRIORITIZE files (tests) are only analyzed if budget
+        remains after high-risk files.
+        """
+        budgets = detection.budgets
+        max_llm_calls = max(0, int(budgets.max_llm_calls_per_pr))
+
+        file_chunks = self._split_diff_by_file(raw_diff)
+        files_changed = len(file_chunks)
+
+        # Build the file→diff map and classification list in stable input order.
+        diff_by_path: Dict[str, str] = {path: diff for path, diff in file_chunks}
+        classifications = classify_files(list(diff_by_path.keys()))
+        selection = select_files_for_analysis(classifications, budgets)
+        coverage = build_coverage_metadata(detection, selection, files_changed=files_changed)
+
+        verdicts: List[Verdict] = []
+        calls_used = 0
+        budget_exhausted_calls = False
+
+        for cls in selection.selected:
+            if calls_used >= max_llm_calls:
+                budget_exhausted_calls = True
+                logger.warning(
+                    "Large PR Mode: LLM call budget exhausted after %d call(s) — "
+                    "skipping remaining selected files",
+                    max_llm_calls,
+                )
+                break
+
+            file_diff = diff_by_path.get(cls.path, "")
+            if not file_diff.strip():
+                continue
+
+            sub_hunks = self._split_file_diff_into_hunks(
+                file_diff, max_hunk_lines=budgets.max_added_lines_per_chunk
+            )
+            # Per-file chunk cap — protects budget on huge single files.
+            sub_hunks = sub_hunks[: max(1, int(budgets.max_chunks_per_file))]
+
+            for hunk in sub_hunks:
+                if calls_used >= max_llm_calls:
+                    budget_exhausted_calls = True
+                    logger.warning(
+                        "Large PR Mode: LLM call budget exhausted mid-file (%s)",
+                        cls.path,
+                    )
+                    break
+                logger.info(
+                    "Large PR Mode: analyzing %s (risk=%d, hunk %d/%d)",
+                    cls.path,
+                    cls.risk_score,
+                    sub_hunks.index(hunk) + 1,
+                    len(sub_hunks),
+                )
+                verdict = self.analyze_diff(hunk, large_pr_mode=True)
+                verdicts.append(verdict)
+                calls_used += 1
+
+            if budget_exhausted_calls:
+                break
+
+        # Mark coverage as budget-exhausted if either selection or LLM-call
+        # budget was hit during this run.
+        coverage_budget_exhausted = coverage.budget_exhausted or budget_exhausted_calls
+        coverage.budget_exhausted = coverage_budget_exhausted
+
+        return LargePRRunResult(
+            verdicts=verdicts or [Verdict.no_op()],
+            coverage=coverage,
+            selection=selection,
+            llm_calls_budget_used=calls_used,
+            llm_calls_budget_total=max_llm_calls,
+            budget_exhausted=coverage_budget_exhausted,
+        )
 
     @staticmethod
     def _split_diff_by_file(raw_diff: str) -> List[Tuple[str, str]]:
