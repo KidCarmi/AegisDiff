@@ -23,11 +23,17 @@ Simulates the complete flow triggered by a pull_request webhook:
 
 No real GitHub API calls, no real LLM calls, no real RSA key needed.
 All external HTTP is intercepted by respx.
+
+The ``TestE2ELargePRScan`` class at the bottom of this file exercises the
+same pipeline against a synthetic 28-file diff that trips Large PR Risk
+Triage Mode (>25 changed files), and asserts the Large PR coverage block,
+banner, skip-reason buckets, LLM-call gating, and inline-post counter.
 """
 from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -500,3 +506,326 @@ class TestE2EPRScan:
 
         print(f"\n  FALSE_POSITIVE → status=success, exit 0 ✓")
         print(f"  Dashboard received verdict=FALSE_POSITIVE ✓")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Large PR Risk Triage Mode — E2E coverage
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _diff_block(path: str, added_lines: list[str], context: str = "import os") -> str:
+    """Build a single-file unified-diff block."""
+    added = "\n".join(f"+{line}" for line in added_lines)
+    return (
+        f"diff --git a/{path} b/{path}\n"
+        f"index 1111111..2222222 100644\n"
+        f"--- a/{path}\n"
+        f"+++ b/{path}\n"
+        f"@@ -1,1 +1,{len(added_lines) + 1} @@\n"
+        f" {context}\n"
+        f"{added}\n"
+    )
+
+
+# The single high-risk file in the Large PR fixture. Carries a CWE-78
+# subprocess(shell=True) sink on an added line so the AST extractor can
+# attach a line_number to the verdict and trigger an inline review.
+LARGE_PR_AUTH_PATH = "src/auth/login.py"
+LARGE_PR_AUTH_FILE_CONTENT = """\
+import subprocess
+from django.http import HttpResponse
+
+
+def login(request):
+    user = request.GET.get('user', '')
+    result = subprocess.check_output(f'echo {user}', shell=True)
+    return HttpResponse(result)
+"""
+
+
+def _build_large_pr_diff() -> str:
+    """28-file synthetic diff that trips Large PR Risk Triage Mode.
+
+    Composition:
+      *  1 high-risk auth file with a real subprocess(shell=True) sink
+      * 12 docs (skip → ``docs``)
+      *  8 generated/build artefacts (skip → ``generated``)
+      *  3 static assets (skip → ``static_asset``)
+      *  1 lockfile (skip → ``dependency_only``)
+      *  1 test file (deprioritize)
+      *  2 neutral utility source files (analyze, low risk)
+    """
+    blocks: list[str] = []
+
+    blocks.append(
+        _diff_block(
+            LARGE_PR_AUTH_PATH,
+            [
+                "import subprocess",
+                "from django.http import HttpResponse",
+                "def login(request):",
+                "    user = request.GET.get('user', '')",
+                "    result = subprocess.check_output(f'echo {user}', shell=True)",
+                "    return HttpResponse(result)",
+            ],
+        )
+    )
+    for i in range(12):
+        blocks.append(_diff_block(f"docs/page_{i}.md", [f"Updated section {i}."]))
+    for i in range(8):
+        blocks.append(_diff_block(f"dist/bundle_{i}.js", [f"console.log('built {i}');"]))
+    for i in range(3):
+        blocks.append(_diff_block(f"web/public/asset_{i}.svg", [f"<svg id='{i}'/>"]))
+    blocks.append(_diff_block("package-lock.json", ['"version": "1.0.1",']))
+    blocks.append(
+        _diff_block(
+            "tests/test_module.py",
+            ["def test_smoke(): assert True"],
+        )
+    )
+    for i in range(2):
+        blocks.append(
+            _diff_block(
+                f"src/utils/helper_{i}.py",
+                [f"def helper_{i}(): return {i}"],
+            )
+        )
+    return "".join(blocks)
+
+
+# LLM mock response — same TRUE_POSITIVE for every chunk in this E2E.
+LARGE_PR_LLM_VERDICT_JSON = json.dumps(
+    {
+        "verdict": "TRUE_POSITIVE",
+        "severity": "HIGH",
+        "cwe_id": "CWE-78",
+        "confidence": 0.92,
+        "title": "OS Command Injection via shell=True",
+        "summary": "User input flows into subprocess.check_output with shell=True.",
+        "evidence": "subprocess.check_output(f'echo {user}', shell=True)",
+        "sanitizer_found": False,
+        "sanitizer_description": None,
+        "attack_vector": "user query parameter",
+        "remediation": "Use a list argv and validate user input.",
+        "false_positive_reason": None,
+    }
+)
+
+
+LARGE_PR_LLM_RESPONSE = {
+    "id": "chatcmpl-large-pr-test",
+    "choices": [
+        {
+            "index": 0,
+            "message": {"role": "assistant", "content": LARGE_PR_LLM_VERDICT_JSON},
+            "finish_reason": "stop",
+        }
+    ],
+    "usage": {"prompt_tokens": 220, "completion_tokens": 110, "total_tokens": 330},
+    "model": "Llama-3.3-70B-Instruct",
+}
+
+
+class TestE2ELargePRScan:
+    """Full GitHub App pipeline E2E for Large PR Risk Triage Mode.
+
+    Same respx pattern as ``TestE2EPRScan``: every external HTTP call is
+    mocked, no network, no real GitHub or LLM. The synthetic diff has 28
+    files so detection trips on changed_files > 25.
+    """
+
+    @respx.mock
+    def test_full_pipeline_large_pr_mode(self, capsys, monkeypatch):
+        for key, val in _env_vars().items():
+            monkeypatch.setenv(key, val)
+
+        large_pr_diff = _build_large_pr_diff()
+
+        # Sanity: the synthetic diff really does trigger Large PR Mode.
+        file_count = large_pr_diff.count("diff --git ")
+        assert file_count == 28, f"fixture changed shape: {file_count} files"
+
+        # ── PR diff ─────────────────────────────────────────────────────────
+        diff_route = respx.get(
+            f"{GITHUB_API}/repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}"
+        ).mock(return_value=httpx.Response(200, text=large_pr_diff))
+
+        # ── File contents — specific mock for the auth file (with sink),
+        # catch-all 404 for everything else. The order matters: respx tries
+        # routes in registration order and returns the first match.
+        auth_content_route = respx.get(
+            f"{GITHUB_API}/repos/{OWNER}/{REPO}/contents/{LARGE_PR_AUTH_PATH}"
+        ).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "encoding": "base64",
+                    "content": _b64_encode(LARGE_PR_AUTH_FILE_CONTENT),
+                },
+            )
+        )
+        contents_pattern = re.compile(
+            rf"^{re.escape(GITHUB_API)}/repos/{OWNER}/{REPO}/contents/.*"
+        )
+        catchall_content_route = respx.get(url__regex=contents_pattern).mock(
+            return_value=httpx.Response(404, json={"message": "Not Found"})
+        )
+
+        # ── LLM ─────────────────────────────────────────────────────────────
+        llm_route = respx.post(GITHUB_MODELS_URL).mock(
+            return_value=httpx.Response(200, json=LARGE_PR_LLM_RESPONSE)
+        )
+
+        # ── Inline review (auth file is the only one with a known sink line)
+        review_route = respx.post(
+            f"{GITHUB_API}/repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/reviews"
+        ).mock(return_value=httpx.Response(200, json={"id": 11}))
+
+        # ── Summary comment upsert ──────────────────────────────────────────
+        list_comments_route = respx.get(
+            f"{GITHUB_API}/repos/{OWNER}/{REPO}/issues/{PR_NUMBER}/comments"
+        ).mock(return_value=httpx.Response(200, json=[]))
+        create_comment_route = respx.post(
+            f"{GITHUB_API}/repos/{OWNER}/{REPO}/issues/{PR_NUMBER}/comments"
+        ).mock(return_value=httpx.Response(201, json={"id": 99}))
+
+        # ── Commit status, SARIF, dashboard ingest ─────────────────────────
+        status_route = respx.post(
+            f"{GITHUB_API}/repos/{OWNER}/{REPO}/statuses/{COMMIT_SHA}"
+        ).mock(return_value=httpx.Response(201, json={}))
+        sarif_route = respx.post(
+            f"{GITHUB_API}/repos/{OWNER}/{REPO}/code-scanning/sarifs"
+        ).mock(return_value=httpx.Response(202, json={"id": "sarif-large"}))
+        ingest_route = respx.post(INGEST_URL).mock(
+            return_value=httpx.Response(200, json={"ok": True})
+        )
+
+        from aegisdiff.github.app_client import GitHubAppClient
+
+        with (
+            patch.object(
+                GitHubAppClient, "get_installation_token", return_value=FAKE_TOKEN
+            ),
+            patch("aegisdiff.llm.platform_keys.get_oidc_token", return_value=None),
+        ):
+            from aegisdiff.app_entrypoint import main
+
+            try:
+                main()
+                exit_code = 0
+            except SystemExit as e:
+                exit_code = e.code
+
+        # ── ASSERTIONS ──────────────────────────────────────────────────────
+
+        # 1. Pipeline ran end to end.
+        assert diff_route.called
+        assert llm_route.called
+        assert create_comment_route.called
+        assert status_route.called
+        assert sarif_route.called, "SARIF upload should still be attempted in Large PR Mode"
+        assert ingest_route.called, "Dashboard ingest should still fire in Large PR Mode"
+
+        # 2. Banner appears in summary PR comment.
+        comment_body = json.loads(create_comment_route.calls.last.request.content)["body"]
+        assert (
+            "AegisDiff ran in Large PR Risk Triage Mode" in comment_body
+        ), "Large PR banner missing from summary comment"
+        assert (
+            "Large PR Risk Triage Mode coverage" in comment_body
+        ), "Large PR coverage <details> block missing"
+
+        # 3. Coverage block reports the planned counts.
+        assert "Files changed:" in comment_body
+        assert "Files analyzed:" in comment_body
+        assert "Files skipped:" in comment_body
+        assert "LLM calls used:" in comment_body
+        assert "Budget exhausted:" in comment_body
+
+        # 4. Skip-reason buckets present for the categories in the fixture.
+        assert "`docs`" in comment_body, "docs skip-reason missing"
+        assert "`generated`" in comment_body, "generated skip-reason missing"
+        assert "`static_asset`" in comment_body, "static_asset skip-reason missing"
+        assert "`dependency_only`" in comment_body, "dependency_only skip-reason missing"
+
+        # 5. The Large PR triggers note carries our threshold reason.
+        assert "changed_files=28" in comment_body, "Large PR trigger reason missing"
+
+        # 6. The full raw diff is NEVER sent as a single LLM prompt.
+        assert llm_route.call_count >= 1
+        for call in llm_route.calls:
+            payload = json.loads(call.request.content)
+            user_msg = payload["messages"][1]["content"]
+            assert (
+                large_pr_diff not in user_msg
+            ), "Large PR Mode must not send the full raw diff in one prompt"
+            # Each prompt must carry the Large PR addendum so the model
+            # applies the change-only constraints.
+            sys_msg = payload["messages"][0]["content"]
+            assert (
+                "LARGE PR RISK TRIAGE MODE" in sys_msg
+            ), "Large PR addendum missing from system prompt"
+            assert (
+                "UNTRUSTED INPUT" in sys_msg
+            ), "Prompt-injection defense missing from system prompt"
+
+        # 7. LLM call count respects the budget. With our fixture the only
+        # ANALYZE-eligible files are 1 auth + 2 utility helpers; the test
+        # file is DEPRIORITIZED but still gets a call once the analyze
+        # files are covered. Default max_llm_calls_per_pr is 40; the run
+        # must stay well within that.
+        assert llm_route.call_count <= 40, (
+            f"LLM call budget exceeded: {llm_route.call_count} > 40"
+        )
+        assert llm_route.call_count >= 1, "Expected at least one LLM call"
+
+        # 8. Inline-comment count reflects only successful create_review
+        # returns. The auth file has a real sink line; helpers and the
+        # test file have no sinks, so they don't trigger inline reviews.
+        if review_route.called:
+            posted = review_route.call_count
+            assert (
+                f"Inline comments posted: **{posted}**" in comment_body
+            ), (
+                f"Summary inline-post count out of sync with actual posts "
+                f"(posted={posted}, comment={comment_body!r})"
+            )
+        else:
+            # No inline reviews succeeded → summary should report zero or
+            # omit the line entirely. Either is acceptable; the contract
+            # is "don't overstate".
+            assert (
+                "Inline comments posted: **0**" in comment_body
+                or "Inline comments posted:" not in comment_body
+            )
+
+        # 9. Dashboard ingest payload still reflects scan metadata
+        # (no new schema, just the existing fields).
+        ingest_body = json.loads(ingest_route.calls.last.request.content)
+        item = ingest_body[0] if isinstance(ingest_body, list) else ingest_body
+        assert item["verdict"] == "TRUE_POSITIVE"
+        assert item["pr_number"] == PR_NUMBER
+        assert item["commit_sha"] == COMMIT_SHA
+
+        # 10. High-confidence TRUE_POSITIVE → exit 1 (blocks merge).
+        assert exit_code == 1, (
+            f"Expected exit 1 for high-confidence TRUE_POSITIVE in Large PR "
+            f"Mode, got {exit_code}"
+        )
+
+        # ── Trace output for human inspection ──────────────────────────────
+        print("\n" + "=" * 70)
+        print("  AegisDiff Large PR Mode E2E — Pipeline Trace")
+        print("=" * 70)
+        print(f"  Files in diff      : {file_count} (Large PR threshold: >25)")
+        print(f"  LLM calls          : {llm_route.call_count}")
+        print(f"  Inline reviews     : {review_route.call_count}")
+        print(f"  Summary posted     : {'✓' if create_comment_route.called else '✗'}")
+        print(f"  SARIF uploaded     : {'✓' if sarif_route.called else '✗'}")
+        print(f"  Ingest sent        : {'✓' if ingest_route.called else '✗'}")
+        print(f"  Auth content fetch : {'✓' if auth_content_route.called else '✗'}")
+        print(f"  Other content 404s : {catchall_content_route.call_count}")
+        comments_state = "queried" if list_comments_route.called else "not queried"
+        print(f"  Existing comments  : {comments_state}")
+        print(f"  Exit code          : {exit_code}")
+        print("=" * 70 + "\n")
