@@ -13,7 +13,14 @@ from typing import Dict, List, Optional, Tuple
 
 from .file_classifier import Decision, FileClassification
 from .large_pr import LargePRBudgets
-from .verdicts import Verdict, severity_rank
+from .verdicts import Verdict, VerdictType, severity_rank
+
+# Verdict types that are eligible to become inline PR review comments.
+# FALSE_POSITIVE is excluded — surfacing "this is fine" inline would be
+# pure noise on every line of a large PR. ERROR is excluded too: an engine
+# failure on one chunk should not pin a comment on a random line; it
+# belongs in the summary instead.
+_INLINE_ACTIONABLE_VERDICTS = frozenset({VerdictType.TRUE_POSITIVE, VerdictType.NEEDS_REVIEW})
 
 # Stable skip-reason categories used in counters and coverage metadata.
 SKIP_REASON_DOCS = "docs"
@@ -144,11 +151,17 @@ def select_inline_findings(
     """Pick which findings should become inline PR review comments in
     Large PR Risk Triage Mode, and report the exact overflow count.
 
-    A verdict is *eligible* to be an inline comment iff it has both a
-    ``file_path`` and a ``line_number`` — without those, the GitHub API
-    cannot post the comment on a specific line. Eligible verdicts are
-    sorted by ``severity_rank`` descending (CRITICAL first); ties keep
-    their original order so the result is deterministic.
+    Eligibility (all must be true):
+      * ``verdict.verdict`` is one of TRUE_POSITIVE or NEEDS_REVIEW —
+        FALSE_POSITIVE and ERROR are deliberately excluded so we never
+        spam reviewers with "this is fine" comments or pin engine errors
+        to a random line.
+      * ``verdict.file_path`` is set.
+      * ``verdict.line_number`` is set.
+
+    Eligible verdicts are sorted by ``severity_rank`` descending
+    (CRITICAL first). Ties keep their original order so the result is
+    deterministic.
 
     Returns ``(selected, overflow)`` where:
       * ``selected`` is the eligible-and-sorted list truncated to
@@ -156,12 +169,16 @@ def select_inline_findings(
       * ``overflow`` is exactly
         ``max(0, len(eligible) - max_inline_comments)``.
 
-    Findings that aren't eligible (no file/line) NEVER count toward
-    overflow — overflow only describes inline-comment-capable findings
-    that were dropped because of the cap.
+    Findings that aren't eligible — wrong verdict type, missing file/
+    line — NEVER count toward overflow. Overflow only describes inline-
+    comment-capable findings that were dropped because of the cap.
     """
     cap = max(0, int(max_inline_comments))
-    eligible = [v for v in verdicts if v.line_number and v.file_path]
+    eligible = [
+        v
+        for v in verdicts
+        if v.verdict in _INLINE_ACTIONABLE_VERDICTS and v.line_number and v.file_path
+    ]
     eligible.sort(key=lambda v: severity_rank(v.severity), reverse=True)
     selected = eligible[:cap]
     overflow = max(0, len(eligible) - cap)

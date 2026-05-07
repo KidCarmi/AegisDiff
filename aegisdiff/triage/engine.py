@@ -110,6 +110,84 @@ def _trim_chunk_to_byte_budget(chunk: str, max_bytes: int) -> Tuple[str, bool]:
     return out, True
 
 
+def _trim_user_message_to_byte_budget(user_message: str, max_bytes: int) -> Tuple[str, bool]:
+    """Trim a Large PR Mode ``LLMRequest.user_message`` to fit ``max_bytes``.
+
+    The user_message produced by ``build_user_message`` has three regions:
+
+      1. **Header** — DIFF SUMMARY, CHANGED FILES, DATA FLOW PATH list. Ends
+         just before the ``<<<CODE>>>`` marker.
+      2. **Code block** — imported definitions + raw diff snippet +
+         surrounding context. Lives between ``<<<CODE>>>`` and
+         ``<<<END_CODE>>>``. This is the only region that may be
+         shortened — it's the part that scales with the diff size.
+      3. **Trailing instruction** — everything after ``<<<END_CODE>>>``,
+         including the JSON schema reminder. Critical for verdict
+         formatting; must always survive intact.
+
+    Strategy: keep regions 1 and 3 verbatim, byte-truncate region 2 (on
+    a UTF-8-safe boundary) until the total fits. A short marker is
+    inserted so the model can tell the context was clipped.
+
+    If the message has no ``<<<CODE>>>`` markers (unexpected), fall back
+    to a head+tail byte split that preserves the start and the end.
+
+    Returns ``(trimmed, was_trimmed)``. Original is returned unchanged
+    when it already fits.
+    """
+    if max_bytes <= 0:
+        return user_message, False
+    if len(user_message.encode("utf-8")) <= max_bytes:
+        return user_message, False
+
+    code_open = "<<<CODE>>>"
+    code_close = "<<<END_CODE>>>"
+    open_idx = user_message.find(code_open)
+    close_idx = user_message.find(code_close)
+
+    marker = "\n\n... [code context trimmed to fit Large PR prompt budget] ...\n\n"
+    marker_bytes = len(marker.encode("utf-8"))
+
+    if open_idx == -1 or close_idx == -1 or close_idx < open_idx:
+        # No markers — keep the head and the tail so trailing instructions
+        # survive even though we couldn't isolate the code block.
+        encoded = user_message.encode("utf-8")
+        budget = max(0, max_bytes - marker_bytes)
+        half = budget // 2
+        head = encoded[:half]
+        tail = encoded[-half:] if half > 0 else b""
+        return (
+            head.decode("utf-8", errors="ignore") + marker + tail.decode("utf-8", errors="ignore"),
+            True,
+        )
+
+    # Region 1 ends at the open marker (inclusive).
+    head = user_message[: open_idx + len(code_open)]
+    # Region 3 starts at the close marker (inclusive).
+    tail = user_message[close_idx:]
+    head_bytes = len(head.encode("utf-8"))
+    tail_bytes = len(tail.encode("utf-8"))
+
+    available_for_code = max_bytes - head_bytes - tail_bytes - marker_bytes
+    code_section = user_message[open_idx + len(code_open) : close_idx]
+
+    if available_for_code <= 0:
+        # Header + tail + marker already exceed budget. Send the cleanly
+        # framed head + marker + tail anyway — the schema instruction in
+        # ``tail`` is non-negotiable, even if total bytes still spill.
+        return head + marker + tail, True
+
+    code_encoded = code_section.encode("utf-8")
+    if len(code_encoded) <= available_for_code:
+        # Code already fits — but the whole message didn't, which means
+        # head/tail dominate. Return head+code+marker+tail; if still over,
+        # caller (logger) just records the warning. Cleanest framing.
+        return head + code_section + marker + tail, True
+
+    truncated_code = code_encoded[:available_for_code].decode("utf-8", errors="ignore")
+    return head + truncated_code + marker + tail, True
+
+
 @dataclass
 class LargePRRunResult:
     """Per-run output of ``analyze_diff_large_pr_mode``.
@@ -154,7 +232,12 @@ class TriageEngine:
         self._file_cache = file_cache or {}
         self._file_fetcher = file_fetcher
 
-    def analyze_diff(self, raw_diff: str, large_pr_mode: bool = False) -> Verdict:
+    def analyze_diff(
+        self,
+        raw_diff: str,
+        large_pr_mode: bool = False,
+        max_user_message_bytes: Optional[int] = None,
+    ) -> Verdict:
         """
         Analyze a unified diff and return a security verdict.
 
@@ -164,6 +247,11 @@ class TriageEngine:
                 is appended to the system prompt so the model only flags
                 vulnerabilities actually introduced or exposed by the PR.
                 The verdict JSON schema is unchanged.
+            max_user_message_bytes: When set (Large PR Mode only) the final
+                ``LLMRequest.user_message`` is trimmed to fit this byte
+                budget *before* the LLM call. The system prompt is never
+                trimmed. ``None`` (default) preserves the legacy small-PR
+                behaviour: no user_message-level trimming.
 
         Returns:
             Verdict — always returns a value, never raises.
@@ -210,9 +298,25 @@ class TriageEngine:
             if large_pr_mode:
                 system_prompt = APPSEC_SYSTEM_PROMPT + LARGE_PR_PROMPT_ADDENDUM
 
+            user_message = build_user_message(context)
+            # Large PR Mode only: cap the final user_message size. The
+            # system prompt is intentionally NOT touched — calibration
+            # rules, schema, and the prompt-injection defense must remain
+            # intact regardless of how big the diff context grew.
+            if large_pr_mode and max_user_message_bytes:
+                user_message, was_trimmed = _trim_user_message_to_byte_budget(
+                    user_message, max_user_message_bytes
+                )
+                if was_trimmed:
+                    logger.warning(
+                        "Large PR Mode: user_message exceeded %d bytes — "
+                        "code context trimmed (header + schema preserved)",
+                        max_user_message_bytes,
+                    )
+
             request = LLMRequest(
                 system_prompt=system_prompt,
-                user_message=build_user_message(context),
+                user_message=user_message,
                 max_tokens=1024,
                 temperature=0.05,  # Near-deterministic for security verdicts
             )
@@ -417,7 +521,11 @@ class TriageEngine:
                     idx,
                     len(sub_hunks),
                 )
-                verdict = self.analyze_diff(trimmed_hunk, large_pr_mode=True)
+                verdict = self.analyze_diff(
+                    trimmed_hunk,
+                    large_pr_mode=True,
+                    max_user_message_bytes=budgets.max_user_message_bytes,
+                )
                 verdicts.append(verdict)
                 calls_used += 1
 

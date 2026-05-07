@@ -740,3 +740,262 @@ def test_file_classifier_has_no_stale_substring_comment():
     # was substring-based — that wording must be gone.
     assert "path-substring based" not in text
     assert "Score is path-substring" not in text
+
+
+# ── PR #4 review fix 1: actionable-only inline eligibility ─────────────────
+
+
+def _verdict_with(
+    verdict_type: VerdictType,
+    severity: Severity = Severity.HIGH,
+    line: int = 10,
+    path: str = "src/x.py",
+    confidence: float = 0.9,
+) -> Verdict:
+    return Verdict(
+        verdict=verdict_type,
+        severity=severity,
+        cwe_id="CWE-89",
+        confidence=confidence,
+        title="t",
+        summary="",
+        evidence="",
+        sanitizer_found=False,
+        sanitizer_description=None,
+        attack_vector=None,
+        remediation=None,
+        false_positive_reason=None,
+        line_number=line,
+        file_path=path,
+    )
+
+
+def test_inline_eligibility_excludes_false_positive_with_line_and_path():
+    from aegisdiff.triage.budget import select_inline_findings
+
+    fp = _verdict_with(VerdictType.FALSE_POSITIVE)
+    selected, overflow = select_inline_findings([fp], max_inline_comments=10)
+    assert selected == []
+    assert overflow == 0
+
+
+def test_inline_eligibility_includes_needs_review():
+    from aegisdiff.triage.budget import select_inline_findings
+
+    nr = _verdict_with(VerdictType.NEEDS_REVIEW)
+    selected, overflow = select_inline_findings([nr], max_inline_comments=10)
+    assert selected == [nr]
+    assert overflow == 0
+
+
+def test_inline_eligibility_includes_true_positive():
+    from aegisdiff.triage.budget import select_inline_findings
+
+    tp = _verdict_with(VerdictType.TRUE_POSITIVE)
+    selected, overflow = select_inline_findings([tp], max_inline_comments=10)
+    assert selected == [tp]
+    assert overflow == 0
+
+
+def test_inline_eligibility_excludes_error_verdicts():
+    from aegisdiff.triage.budget import select_inline_findings
+
+    err = _verdict_with(VerdictType.ERROR, severity=Severity.NA, confidence=0.0)
+    selected, overflow = select_inline_findings([err], max_inline_comments=10)
+    assert selected == []
+    assert overflow == 0
+
+
+def test_inline_overflow_ignores_false_positive_and_error():
+    """Overflow must count only verdicts that are eligible to be inline.
+    A flood of FALSE_POSITIVE / ERROR rows must not inflate overflow.
+    """
+    from aegisdiff.triage.budget import select_inline_findings
+
+    eligible = [_verdict_with(VerdictType.TRUE_POSITIVE, line=i + 1) for i in range(5)] + [
+        _verdict_with(VerdictType.NEEDS_REVIEW, line=i + 100) for i in range(3)
+    ]
+    noise = [_verdict_with(VerdictType.FALSE_POSITIVE, line=i + 200) for i in range(20)] + [
+        _verdict_with(VerdictType.ERROR, line=i + 300) for i in range(5)
+    ]
+
+    selected, overflow = select_inline_findings(eligible + noise, max_inline_comments=4)
+    assert len(selected) == 4
+    # Overflow = max(0, 8 eligible - 4 cap) = 4. NOT 33.
+    assert overflow == 4
+    # Every selected verdict is actionable.
+    for v in selected:
+        assert v.verdict in (VerdictType.TRUE_POSITIVE, VerdictType.NEEDS_REVIEW)
+
+
+def test_inline_eligibility_mixed_actionable_sorted_by_severity():
+    """Mixed TP/NR with different severities — CRITICAL TP first, then by rank."""
+    from aegisdiff.triage.budget import select_inline_findings
+
+    nr_low = _verdict_with(VerdictType.NEEDS_REVIEW, severity=Severity.LOW, line=1)
+    tp_crit = _verdict_with(VerdictType.TRUE_POSITIVE, severity=Severity.CRITICAL, line=2)
+    nr_high = _verdict_with(VerdictType.NEEDS_REVIEW, severity=Severity.HIGH, line=3)
+    fp_crit = _verdict_with(VerdictType.FALSE_POSITIVE, severity=Severity.CRITICAL, line=4)
+
+    selected, _ = select_inline_findings([nr_low, tp_crit, nr_high, fp_crit], max_inline_comments=2)
+    # FP_CRIT must NOT appear; CRIT TP first, then HIGH NR.
+    assert [v.verdict for v in selected] == [
+        VerdictType.TRUE_POSITIVE,
+        VerdictType.NEEDS_REVIEW,
+    ]
+    assert [v.severity for v in selected] == [Severity.CRITICAL, Severity.HIGH]
+
+
+# ── PR #4 review fix 2: final user_message byte cap (option A) ────────────
+
+
+def test_max_user_message_bytes_default_is_96k():
+    assert LargePRBudgets().max_user_message_bytes == 96_000
+
+
+def test_trim_user_message_returns_input_unchanged_when_under_budget():
+    from aegisdiff.triage.engine import _trim_user_message_to_byte_budget
+
+    msg = "DIFF SUMMARY: hi\n<<<CODE>>>\nx = 1\n<<<END_CODE>>>\nReturn JSON."
+    out, trimmed = _trim_user_message_to_byte_budget(msg, 64_000)
+    assert out == msg
+    assert trimmed is False
+
+
+def test_trim_user_message_preserves_header_and_trailing_instruction():
+    """The trailing JSON-schema instruction must always survive."""
+    from aegisdiff.triage.engine import _trim_user_message_to_byte_budget
+
+    head = "DIFF SUMMARY: small\nCHANGED FILES: x.py\n\nDATA FLOW PATH 1: ...\n"
+    body = "x = 1\n" * 20_000  # ~120 KB of inner code
+    tail = "<<<END_CODE>>>\n\nAnalyze and return the JSON verdict schema exactly."
+    msg = head + "<<<CODE>>>\n" + body + tail
+    out, trimmed = _trim_user_message_to_byte_budget(msg, 8_000)
+
+    assert trimmed is True
+    assert len(out.encode("utf-8")) <= 8_000
+    assert head.split("\n", 1)[0] in out  # DIFF SUMMARY survives
+    assert "DATA FLOW PATH 1" in out
+    assert "JSON verdict schema" in out  # critical schema instruction
+    assert "<<<END_CODE>>>" in out
+    assert "code context trimmed" in out  # marker present
+
+
+def test_trim_user_message_falls_back_when_no_markers_present():
+    from aegisdiff.triage.engine import _trim_user_message_to_byte_budget
+
+    # No <<<CODE>>> markers — should still keep head + tail bytes.
+    msg = "HEAD: this is the header.\n" + "x" * 50_000 + "\nTAIL: schema goes here."
+    out, trimmed = _trim_user_message_to_byte_budget(msg, 1_000)
+    assert trimmed is True
+    assert "HEAD" in out
+    assert "TAIL" in out
+    assert "trimmed" in out
+
+
+def test_large_pr_mode_caps_final_user_message_size():
+    """The final LLMRequest.user_message in Large PR Mode must respect
+    budgets.max_user_message_bytes — even when the chunk byte cap was
+    fine but the extractor pushed surrounding context way past it.
+    """
+    raw = _build_diff(num_files=26, lines_per_file=4, prefix="src/auth/h")
+    budgets = LargePRBudgets(
+        max_files_analyzed=2,
+        max_chunks_per_file=1,
+        max_added_lines_per_chunk=10,
+        max_chunk_bytes=32_000,
+        max_user_message_bytes=4_000,  # tight cap to force trimming
+        max_llm_calls_per_pr=3,
+    )
+    detection = detect_large_pr(
+        changed_files=26,
+        added_lines=200,
+        total_diff_bytes=len(raw.encode("utf-8")),
+        budgets=budgets,
+    )
+
+    # Plant a giant user_message via a custom build_user_message wrapper:
+    # we monkeypatch the engine's build_user_message import to inflate output.
+    import aegisdiff.triage.engine as eng
+
+    real_build = eng.build_user_message
+
+    def _giant_build(context):
+        # Wrap the real header + JSON-schema tail around a huge code block.
+        return (
+            "DIFF SUMMARY: forced-large\n"
+            "CHANGED FILES: a, b\n\n"
+            "DATA FLOW PATH 1:\n  ...\n"
+            "<<<CODE>>>\n" + ("+    inflated_line = 'x' * 50\n" * 5_000) + "<<<END_CODE>>>\n\n"
+            "Analyze the above and return the JSON verdict schema exactly."
+        )
+
+    eng.build_user_message = _giant_build
+    try:
+        engine, orch = _make_engine_with_recording_orchestrator()
+        engine.analyze_diff_large_pr_mode(raw, detection)
+    finally:
+        eng.build_user_message = real_build
+
+    assert orch.complete.call_count >= 1
+    for call in orch.complete.call_args_list:
+        req = call.args[0]
+        assert len(req.user_message.encode("utf-8")) <= budgets.max_user_message_bytes
+        # The schema instruction must survive trimming.
+        assert "JSON verdict schema" in req.user_message
+        # And the system prompt is never trimmed.
+        assert "ANALYSIS PROTOCOL" in req.system_prompt
+        assert "UNTRUSTED INPUT" in req.system_prompt
+
+
+def test_small_pr_user_message_is_not_trimmed():
+    """analyze_diff() with default args (small-PR path) must NOT trim
+    user_message even when given a huge synthetic one."""
+    import aegisdiff.triage.engine as eng
+
+    real_build = eng.build_user_message
+
+    def _huge_build(context):
+        return "<<<CODE>>>\n" + ("inflated_line = 'x' * 50\n" * 10_000) + "<<<END_CODE>>>\nAnalyze."
+
+    eng.build_user_message = _huge_build
+    try:
+        orch = MagicMock(spec=LLMOrchestrator)
+        orch.complete.side_effect = lambda req: _llm_response(_fp_json())
+        engine = TriageEngine(orch, repo_root=Path("."))
+        engine.analyze_diff(_build_diff(num_files=1, lines_per_file=1))
+    finally:
+        eng.build_user_message = real_build
+
+    sent = orch.complete.call_args.args[0].user_message
+    # Small PR: NOT trimmed — full huge user_message goes through.
+    assert "code context trimmed" not in sent
+    assert len(sent.encode("utf-8")) > 100_000
+
+
+def test_analyze_diff_ignores_max_user_message_bytes_when_not_large_pr_mode():
+    """Defense in depth: even if a future caller passes the byte cap into
+    analyze_diff() with large_pr_mode=False, the trim must not engage."""
+    import aegisdiff.triage.engine as eng
+
+    real_build = eng.build_user_message
+
+    def _huge_build(context):
+        return "<<<CODE>>>\n" + ("xx\n" * 100_000) + "<<<END_CODE>>>\nAnalyze."
+
+    eng.build_user_message = _huge_build
+    try:
+        orch = MagicMock(spec=LLMOrchestrator)
+        orch.complete.side_effect = lambda req: _llm_response(_fp_json())
+        engine = TriageEngine(orch, repo_root=Path("."))
+        engine.analyze_diff(
+            _build_diff(num_files=1, lines_per_file=1),
+            large_pr_mode=False,
+            max_user_message_bytes=2_000,
+        )
+    finally:
+        eng.build_user_message = real_build
+
+    sent = orch.complete.call_args.args[0].user_message
+    assert "code context trimmed" not in sent  # cap silently ignored
+    assert len(sent.encode("utf-8")) > 50_000
