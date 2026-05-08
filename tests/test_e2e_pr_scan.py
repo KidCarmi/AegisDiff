@@ -811,3 +811,347 @@ class TestE2ELargePRScan:
         print(f"  Existing comments  : {comments_state}")
         print(f"  Exit code          : {exit_code}")
         print("=" * 70 + "\n")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Manual GitHub Actions entrypoint — E2E coverage
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# ``aegisdiff/entrypoint.py`` is invoked by the workflow that runs on a
+# checked-out repo (no GitHub App). It diverges from the App path in three
+# meaningful ways:
+#   * Diff comes from a local file at ``DIFF_PATH``, not a GitHub HTTP fetch.
+#   * Auth uses ``GITHUB_TOKEN`` directly (no JWT / installation token).
+#   * Ingest uses OIDC OR ``AEGISDIFF_REPO_TOKEN`` as the Bearer token.
+#   * Step summary is appended to ``$GITHUB_STEP_SUMMARY``.
+#
+# These two tests exercise the full manual pipeline (small PR + Large PR Mode)
+# through ``aegisdiff.entrypoint.main()`` with every external HTTP call
+# intercepted by respx and the OIDC fetch patched to ``None``.
+
+
+def _manual_env_vars(diff_path: str, step_summary_path: str = "") -> dict:
+    """Env vars the GitHub Actions workflow injects for the manual path."""
+    env = {
+        "GITHUB_TOKEN": "test_github_actions_token",
+        "REPO": f"{OWNER}/{REPO}",
+        "PR_NUMBER": str(PR_NUMBER),
+        "COMMIT_SHA": COMMIT_SHA,
+        "DIFF_PATH": diff_path,
+        "AEGISDIFF_INGEST_URL": INGEST_URL,
+        "AEGISDIFF_REPO_TOKEN": INGEST_TOKEN,
+    }
+    if step_summary_path:
+        env["GITHUB_STEP_SUMMARY"] = step_summary_path
+    return env
+
+
+# Provider-selection env keys we explicitly clear so each manual-path test
+# has a deterministic provider list (only GitHubModelsProvider via
+# GITHUB_TOKEN). Stale developer-environment keys would otherwise alter
+# the orchestrator's failover order and produce flaky CI runs.
+_PROVIDER_ENV_KEYS_TO_CLEAR = (
+    "OPENROUTER_API_KEY",
+    "OPENROUTER_API_KEY_2",
+    "OPENROUTER_API_KEY_3",
+    "GROQ_API_KEY",
+    "GROQ_API_KEY_2",
+    "GROQ_API_KEY_3",
+)
+
+
+class TestE2EManualEntrypoint:
+    """Full pipeline integration tests for ``aegisdiff/entrypoint.py``.
+
+    Every external HTTP call is mocked (no real GitHub or LLM). The OIDC
+    fetch is patched to None so the platform-keys path is skipped and the
+    ingest call falls back to the legacy ``AEGISDIFF_REPO_TOKEN`` Bearer.
+    """
+
+    @respx.mock
+    def test_full_pipeline_manual_true_positive(self, capsys, monkeypatch, tmp_path):
+        """Small PR (sample.diff) → TRUE_POSITIVE through the manual path."""
+        diff_file = tmp_path / "pr.diff"
+        diff_file.write_text(SAMPLE_DIFF)
+        step_summary = tmp_path / "step_summary.md"
+        step_summary.write_text("")
+
+        for key in _PROVIDER_ENV_KEYS_TO_CLEAR:
+            monkeypatch.delenv(key, raising=False)
+        for key, val in _manual_env_vars(str(diff_file), str(step_summary)).items():
+            monkeypatch.setenv(key, val)
+
+        # ── Mocks ───────────────────────────────────────────────────────────
+        # ``_fetch_file`` is the *fallback* the manual path uses when the
+        # extractor can't read a path from disk. Specific 200 for the
+        # vulnerable file, catch-all 404 for everything else.
+        file_route = respx.get(f"{GITHUB_API}/repos/{OWNER}/{REPO}/contents/app/views.py").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "encoding": "base64",
+                    "content": _b64_encode(FILE_CONTENT_PYTHON),
+                },
+            )
+        )
+        contents_pattern = re.compile(rf"^{re.escape(GITHUB_API)}/repos/{OWNER}/{REPO}/contents/.*")
+        catchall_content_route = respx.get(url__regex=contents_pattern).mock(
+            return_value=httpx.Response(404, json={"message": "Not Found"})
+        )
+
+        llm_route = respx.post(GITHUB_MODELS_URL).mock(
+            return_value=httpx.Response(200, json=GITHUB_MODELS_RESPONSE)
+        )
+
+        review_route = respx.post(
+            f"{GITHUB_API}/repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/reviews"
+        ).mock(return_value=httpx.Response(200, json={"id": 51}))
+
+        respx.get(f"{GITHUB_API}/repos/{OWNER}/{REPO}/issues/{PR_NUMBER}/comments").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        create_comment_route = respx.post(
+            f"{GITHUB_API}/repos/{OWNER}/{REPO}/issues/{PR_NUMBER}/comments"
+        ).mock(return_value=httpx.Response(201, json={"id": 81}))
+
+        status_route = respx.post(f"{GITHUB_API}/repos/{OWNER}/{REPO}/statuses/{COMMIT_SHA}").mock(
+            return_value=httpx.Response(201, json={})
+        )
+        sarif_route = respx.post(f"{GITHUB_API}/repos/{OWNER}/{REPO}/code-scanning/sarifs").mock(
+            return_value=httpx.Response(202, json={"id": "sarif-manual-tp"})
+        )
+        ingest_route = respx.post(INGEST_URL).mock(
+            return_value=httpx.Response(200, json={"ok": True})
+        )
+
+        with patch("aegisdiff.llm.platform_keys.get_oidc_token", return_value=None):
+            from aegisdiff.entrypoint import main
+
+            try:
+                main()
+                exit_code = 0
+            except SystemExit as e:
+                exit_code = e.code
+
+        # ── Assertions ──────────────────────────────────────────────────────
+
+        assert llm_route.called, "Expected LLM to be called for analysis"
+        # Confirms the local-file diff actually fed the engine.
+        llm_payload = json.loads(llm_route.calls.last.request.content)
+        user_message = llm_payload["messages"][1]["content"]
+        assert "subprocess" in user_message
+        assert "shell=True" in user_message
+
+        # Inline review route is registered so respx won't error if it is
+        # called. Whether it actually fires depends on whether the AST
+        # resolves a line_number for the primary sink — the manual path
+        # does not pre-populate file_cache the way app_entrypoint does, so
+        # the extractor relies on the lazy ``_fetch_file`` fallback. The
+        # spec only requires the inline route be *attempted or posted
+        # where expected* — both branches are valid here.
+        if review_route.called:
+            inline_payload = json.loads(review_route.calls.last.request.content)
+            assert inline_payload["commit_id"] == COMMIT_SHA
+
+        # Summary comment posted with AegisDiff marker + TP indicators.
+        assert create_comment_route.called
+        comment_body = json.loads(create_comment_route.calls.last.request.content)["body"]
+        assert "<!-- aegisdiff-report -->" in comment_body
+        assert "TRUE_POSITIVE" in comment_body or ":x:" in comment_body
+
+        # Commit status = failure (high-confidence TP blocks merge).
+        assert status_route.called
+        status_payload = json.loads(status_route.calls.last.request.content)
+        assert status_payload["state"] == "failure"
+        assert status_payload["context"] == "AegisDiff / security"
+
+        # SARIF upload attempted.
+        assert sarif_route.called
+
+        # Dashboard ingest called with the *repo-token* Bearer (OIDC patched
+        # to None, so the fallback auth path engages — manual-path specific).
+        assert ingest_route.called
+        assert (
+            ingest_route.calls.last.request.headers["Authorization"] == f"Bearer {INGEST_TOKEN}"
+        ), "Manual path must fall back to AEGISDIFF_REPO_TOKEN when OIDC unavailable"
+
+        ingest_body = json.loads(ingest_route.calls.last.request.content)
+        item = ingest_body[0] if isinstance(ingest_body, list) else ingest_body
+        assert item["verdict"] == "TRUE_POSITIVE"
+        assert item["cwe_id"] == "CWE-78"
+        assert item["pr_number"] == PR_NUMBER
+        assert item["commit_sha"] == COMMIT_SHA
+        assert item["pr_url"] == f"https://github.com/{OWNER}/{REPO}/pull/{PR_NUMBER}"
+
+        # Step summary written (manual-path specific — App path doesn't do this).
+        step_summary_text = step_summary.read_text()
+        assert "TRUE_POSITIVE" in step_summary_text, (
+            f"Expected TRUE_POSITIVE in $GITHUB_STEP_SUMMARY, got: {step_summary_text!r}"
+        )
+
+        # High-confidence TP → exit 1.
+        assert exit_code == 1
+
+        # ── Trace ──────────────────────────────────────────────────────────
+        print("\n" + "=" * 70)
+        print("  AegisDiff Manual Entrypoint E2E (TRUE_POSITIVE) — Pipeline Trace")
+        print("=" * 70)
+        print(f"  Diff source       : {diff_file} ({SAMPLE_DIFF.count(chr(10))} lines)")
+        print(f"  LLM calls         : {llm_route.call_count}")
+        print(f"  Inline reviews    : {review_route.call_count}")
+        print(f"  Summary posted    : {'✓' if create_comment_route.called else '✗'}")
+        print(f"  Status state      : {status_payload['state']}")
+        print(f"  SARIF uploaded    : {'✓' if sarif_route.called else '✗'}")
+        print(f"  Ingest auth       : Bearer {INGEST_TOKEN[:8]}…")
+        print(f"  Step summary line : {step_summary_text.strip().splitlines()[0]}")
+        print(f"  Auth file fetched : {'✓' if file_route.called else '✗'}")
+        print(f"  Catch-all 404s    : {catchall_content_route.call_count}")
+        print(f"  Exit code         : {exit_code}")
+        print("=" * 70 + "\n")
+
+    @respx.mock
+    def test_full_pipeline_manual_large_pr_mode(self, capsys, monkeypatch, tmp_path):
+        """Large PR Mode through the manual path (28-file synthetic diff)."""
+        large_pr_diff = _build_large_pr_diff()
+        diff_file = tmp_path / "large_pr.diff"
+        diff_file.write_text(large_pr_diff)
+        step_summary = tmp_path / "step_summary.md"
+        step_summary.write_text("")
+
+        file_count = large_pr_diff.count("diff --git ")
+        assert file_count == 28, f"fixture changed shape: {file_count} files"
+
+        for key in _PROVIDER_ENV_KEYS_TO_CLEAR:
+            monkeypatch.delenv(key, raising=False)
+        for key, val in _manual_env_vars(str(diff_file), str(step_summary)).items():
+            monkeypatch.setenv(key, val)
+
+        # ── Mocks ───────────────────────────────────────────────────────────
+        auth_content_route = respx.get(
+            f"{GITHUB_API}/repos/{OWNER}/{REPO}/contents/{LARGE_PR_AUTH_PATH}"
+        ).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "encoding": "base64",
+                    "content": _b64_encode(LARGE_PR_AUTH_FILE_CONTENT),
+                },
+            )
+        )
+        contents_pattern = re.compile(rf"^{re.escape(GITHUB_API)}/repos/{OWNER}/{REPO}/contents/.*")
+        catchall_content_route = respx.get(url__regex=contents_pattern).mock(
+            return_value=httpx.Response(404, json={"message": "Not Found"})
+        )
+
+        llm_route = respx.post(GITHUB_MODELS_URL).mock(
+            return_value=httpx.Response(200, json=LARGE_PR_LLM_RESPONSE)
+        )
+
+        review_route = respx.post(
+            f"{GITHUB_API}/repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/reviews"
+        ).mock(return_value=httpx.Response(200, json={"id": 91}))
+
+        respx.get(f"{GITHUB_API}/repos/{OWNER}/{REPO}/issues/{PR_NUMBER}/comments").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        create_comment_route = respx.post(
+            f"{GITHUB_API}/repos/{OWNER}/{REPO}/issues/{PR_NUMBER}/comments"
+        ).mock(return_value=httpx.Response(201, json={"id": 71}))
+
+        status_route = respx.post(f"{GITHUB_API}/repos/{OWNER}/{REPO}/statuses/{COMMIT_SHA}").mock(
+            return_value=httpx.Response(201, json={})
+        )
+        sarif_route = respx.post(f"{GITHUB_API}/repos/{OWNER}/{REPO}/code-scanning/sarifs").mock(
+            return_value=httpx.Response(202, json={"id": "sarif-manual-large"})
+        )
+        ingest_route = respx.post(INGEST_URL).mock(
+            return_value=httpx.Response(200, json={"ok": True})
+        )
+
+        with patch("aegisdiff.llm.platform_keys.get_oidc_token", return_value=None):
+            from aegisdiff.entrypoint import main
+
+            try:
+                main()
+                exit_code = 0
+            except SystemExit as e:
+                exit_code = e.code
+
+        # ── Assertions ──────────────────────────────────────────────────────
+
+        assert llm_route.called
+        assert llm_route.call_count >= 1
+        assert llm_route.call_count <= 40, "LLM call budget should never be exceeded"
+
+        # Banner + coverage block.
+        assert create_comment_route.called
+        comment_body = json.loads(create_comment_route.calls.last.request.content)["body"]
+        assert "AegisDiff ran in Large PR Risk Triage Mode" in comment_body
+        assert "Large PR Risk Triage Mode coverage" in comment_body
+        assert "Files changed:" in comment_body
+        assert "Files analyzed:" in comment_body
+        assert "Files skipped:" in comment_body
+        assert "LLM calls used:" in comment_body
+        assert "Budget exhausted:" in comment_body
+
+        # Skip-reason buckets.
+        assert "`docs`" in comment_body
+        assert "`generated`" in comment_body
+        assert "`static_asset`" in comment_body
+        assert "`dependency_only`" in comment_body
+
+        # Trigger reason references our threshold breach.
+        assert "changed_files=28" in comment_body
+
+        # Full raw diff is NEVER sent in a single LLM prompt; every prompt
+        # carries the addendum + injection defense.
+        for call in llm_route.calls:
+            payload = json.loads(call.request.content)
+            user_msg = payload["messages"][1]["content"]
+            assert large_pr_diff not in user_msg
+            sys_msg = payload["messages"][0]["content"]
+            assert "LARGE PR RISK TRIAGE MODE" in sys_msg
+            assert "UNTRUSTED INPUT" in sys_msg
+
+        # Inline-comments-posted count matches the actual successful review
+        # responses (Codex P2 contract holds for the manual path too).
+        if review_route.called:
+            posted = review_route.call_count
+            assert f"Inline comments posted: **{posted}**" in comment_body, (
+                f"Manual-path inline-post count out of sync: posted={posted}"
+            )
+        else:
+            assert (
+                "Inline comments posted: **0**" in comment_body
+                or "Inline comments posted:" not in comment_body
+            )
+
+        # Commit status, SARIF, ingest all still fire.
+        assert status_route.called
+        status_payload = json.loads(status_route.calls.last.request.content)
+        assert status_payload["state"] == "failure"
+        assert sarif_route.called
+
+        assert ingest_route.called
+        ingest_body = json.loads(ingest_route.calls.last.request.content)
+        item = ingest_body[0] if isinstance(ingest_body, list) else ingest_body
+        assert item["verdict"] == "TRUE_POSITIVE"
+        assert item["pr_number"] == PR_NUMBER
+        assert item["commit_sha"] == COMMIT_SHA
+
+        assert exit_code == 1
+
+        # ── Trace ──────────────────────────────────────────────────────────
+        print("\n" + "=" * 70)
+        print("  AegisDiff Manual Entrypoint E2E (Large PR Mode) — Pipeline Trace")
+        print("=" * 70)
+        print(f"  Diff source     : {diff_file} ({file_count} files)")
+        print(f"  LLM calls       : {llm_route.call_count}")
+        print(f"  Inline reviews  : {review_route.call_count}")
+        print(f"  Summary posted  : {'✓' if create_comment_route.called else '✗'}")
+        print(f"  SARIF uploaded  : {'✓' if sarif_route.called else '✗'}")
+        print(f"  Ingest sent     : {'✓' if ingest_route.called else '✗'}")
+        print(f"  Auth content    : {'✓' if auth_content_route.called else '✗'}")
+        print(f"  Catch-all 404s  : {catchall_content_route.call_count}")
+        print(f"  Exit code       : {exit_code}")
+        print("=" * 70 + "\n")
