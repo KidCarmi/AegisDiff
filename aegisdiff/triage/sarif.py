@@ -78,12 +78,36 @@ def _rule_for_cwe(cwe_id: str, level: str) -> dict:
     return rule
 
 
+def _file_path_dedup_key(file_path: str | None) -> str | None:
+    """Normalise a verdict's ``file_path`` the same way the SARIF emission
+    does, so verdicts that serialise to the same ``artifactLocation.uri``
+    share a dedup key.
+
+    Mirrors the per-result location logic below:
+      * Falsy values (``None``, ``""``) → fallback ``"."`` location;
+        bucketed as ``None`` so they collapse together.
+      * Non-falsy → ``lstrip("/")`` so ``"/src/x.py"`` and ``"src/x.py"``
+        — which both serialise to ``"src/x.py"`` — share the same key.
+    """
+    if not file_path:
+        return None
+    return file_path.lstrip("/")
+
+
 def build_sarif(verdicts: List[Verdict], repo: str, commit_sha: str) -> dict:
     """
     Build a SARIF 2.1.0 document from a list of Verdicts.
 
     Only TRUE_POSITIVE and NEEDS_REVIEW findings are included.
     FALSE_POSITIVE and ERROR verdicts are excluded.
+
+    Result-level deduplication: chunked / Large PR Mode runs may produce
+    multiple actionable verdicts that point at the same finding location
+    (same CWE, same file, same line). Without dedup those would surface
+    as duplicate alerts in the GitHub Security tab. We collapse such
+    groups to a single result, keeping the highest-confidence verdict
+    (ties broken by first-occurrence order so output is deterministic).
+    Rule-level dedup (one rule per unique CWE) is preserved as before.
 
     Args:
         verdicts:    List of Verdict objects from the triage engine.
@@ -94,11 +118,36 @@ def build_sarif(verdicts: List[Verdict], repo: str, commit_sha: str) -> dict:
         v for v in verdicts if v.verdict in (VerdictType.TRUE_POSITIVE, VerdictType.NEEDS_REVIEW)
     ]
 
+    # ── Result-level dedup ────────────────────────────────────────────────
+    # Key: (normalised cwe_id, normalised file_path, line_number).
+    # ``file_path`` is normalised via ``_file_path_dedup_key`` to match
+    # how the SARIF emission later writes ``artifactLocation.uri`` — so
+    # ``"/src/x.py"`` and ``"src/x.py"`` (which both serialise to
+    # ``"src/x.py"``) share a key. Falsy paths bucket together because
+    # they all render to the ``"."`` fallback location.
+    # ``line_number=0`` and ``line_number=None`` both mean "no specific
+    # line" and are normalised to ``None`` so they collapse together.
+    # Different CWEs at the same location stay separate; missing-
+    # location verdicts with different CWEs also stay separate.
+    groups: dict[tuple, Verdict] = {}
+    for v in actionable:
+        cwe_id = v.cwe_id if v.cwe_id and v.cwe_id != "N/A" else "AegisDiff/Finding"
+        line_key = v.line_number if (v.line_number and v.line_number > 0) else None
+        file_key = _file_path_dedup_key(v.file_path)
+        key = (cwe_id, file_key, line_key)
+        existing = groups.get(key)
+        if existing is None or v.confidence > existing.confidence:
+            groups[key] = v
+
+    # Iteration order is insertion order (CPython 3.7+ guarantee), which
+    # gives deterministic SARIF output for the same inputs.
+    deduped = list(groups.values())
+
     # Build deduplicated rules (one per unique CWE)
     seen_rules: dict[str, dict] = {}
     results: list[dict] = []
 
-    for v in actionable:
+    for v in deduped:
         cwe_id = v.cwe_id if v.cwe_id and v.cwe_id != "N/A" else "AegisDiff/Finding"
         level = _SEVERITY_TO_LEVEL.get(v.severity.value, "warning")
 
