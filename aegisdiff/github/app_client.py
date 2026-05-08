@@ -14,6 +14,8 @@ from typing import Optional
 
 import httpx
 
+from ._retry import request_with_retry
+
 logger = logging.getLogger(__name__)
 
 
@@ -62,9 +64,14 @@ class GitHubAppClient:
         """
         Exchange the App JWT for an installation access token.
         Valid for 1 hour.  Never persisted — call this per operation.
+
+        Token mint is the bootstrap operation for every App-authenticated
+        request; transient 5xx / network failures are retried so a
+        flaky token endpoint doesn't kill the entire scan.
         """
         jwt_token = self._make_jwt()
-        resp = httpx.post(
+        resp = request_with_retry(
+            "POST",
             f"{self.BASE_URL}/app/installations/{installation_id}/access_tokens",
             headers={
                 "Authorization": f"Bearer {jwt_token}",
@@ -94,7 +101,9 @@ class GitHubAppClient:
         """
         if token is None:
             token = self.get_installation_token(installation_id)
-        resp = httpx.get(
+        # GET is idempotent — safe to retry transient 5xx / network.
+        resp = request_with_retry(
+            "GET",
             f"{self.BASE_URL}/repos/{owner}/{repo}/pulls/{pr_number}",
             headers={
                 "Authorization": f"Bearer {token}",
@@ -120,7 +129,9 @@ class GitHubAppClient:
         import base64
 
         try:
-            resp = httpx.get(
+            # GET is idempotent — safe to retry transient 5xx / network.
+            resp = request_with_retry(
+                "GET",
                 f"{self.BASE_URL}/repos/{owner}/{repo}/contents/{path}",
                 headers={"Authorization": f"Bearer {token}", "Accept": self.ACCEPT},
                 params={"ref": ref},
@@ -220,8 +231,12 @@ class GitHubAppClient:
             "Accept": self.ACCEPT,
         }
 
-        # List existing comments and find ours
-        resp = httpx.get(
+        # List existing comments and find ours. GET is idempotent so the
+        # transient-5xx retry is safe; the POST/PATCH that follow are
+        # NOT retried (they could double-post a comment if a 5xx came
+        # back after the server had already applied the change).
+        resp = request_with_retry(
+            "GET",
             f"{self.BASE_URL}/repos/{owner}/{repo}/issues/{pr_number}/comments",
             headers=headers,
             params={"per_page": "100"},
@@ -304,7 +319,10 @@ class GitHubAppClient:
         try:
             token = self.get_installation_token(installation_id)
             headers = {"Authorization": f"Bearer {token}", "Accept": self.ACCEPT}
-            resp = httpx.post(
+            # SARIF upload is replace-style for the same tool/ref/sha,
+            # so retrying a transient 5xx is safe.
+            resp = request_with_retry(
+                "POST",
                 f"{self.BASE_URL}/repos/{owner}/{repo}/code-scanning/sarifs",
                 headers=headers,
                 json={
