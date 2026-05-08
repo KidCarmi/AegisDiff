@@ -50,6 +50,90 @@ def _fetch_platform_keys(ingest_url: str, oidc_token: str) -> dict:
     return fetch_platform_keys(ingest_url, oidc_token)
 
 
+def build_manual_file_cache(
+    raw_diff: str,
+    repo_root: Path,
+    github_client,
+    commit_sha: str,
+) -> dict:
+    """Pre-populate a ``file_cache`` for the manual entrypoint's TriageEngine.
+
+    Mirrors the gated prefetch added to the GitHub App path in F3, with
+    one critical difference: the manual path runs in a checked-out repo,
+    so disk reads remain the primary source of truth and Contents API
+    fetches are made only for files that are *not* already on disk under
+    ``repo_root``.
+
+    Filtering rules:
+      * SKIP files (docs / generated / static / minified) — never fetched.
+      * DEPENDENCY_ONLY files (lockfiles) — never fetched.
+      * ANALYZE / DEPRIORITIZE files already present on disk — never
+        fetched (the extractor reads disk first; cache would never win).
+      * ANALYZE / DEPRIORITIZE files NOT on disk — fetched once and
+        cached so the extractor's primary-sink line resolution and
+        surrounding-context windows have content to work with.
+
+    Returns an empty dict when:
+      * ``github_client`` is ``None`` (no token / repo configured).
+      * ``raw_diff`` is empty or has no recognisable file paths.
+
+    The caller passes the result as ``TriageEngine(..., file_cache=...)``.
+    The lazy ``file_fetcher`` fallback for cross-file imports is
+    unchanged and still wired through to the engine.
+    """
+    if github_client is None:
+        return {}
+    if not raw_diff or not raw_diff.strip():
+        return {}
+
+    import re as _re
+
+    from .triage.engine import TriageEngine
+    from .triage.file_classifier import Decision, classify_files
+
+    # Use the existing splitter so the path list matches what the engine
+    # itself sees later. Defensive fallback for binary-only or otherwise
+    # unrecognised diff shapes.
+    file_chunks = TriageEngine._split_diff_by_file(raw_diff)
+    changed_file_paths = [path for path, _diff in file_chunks]
+    if not changed_file_paths:
+        changed_file_paths = _re.findall(r"^\+\+\+ b/(.+)$", raw_diff, _re.MULTILINE)
+    if not changed_file_paths:
+        return {}
+
+    classifications = classify_files(changed_file_paths)
+    worth_fetching = {
+        c.path for c in classifications if c.decision in (Decision.ANALYZE, Decision.DEPRIORITIZE)
+    }
+
+    file_cache: dict = {}
+    skipped_disk = 0
+    fetched = 0
+    for fp in changed_file_paths:
+        if fp not in worth_fetching:
+            continue
+        # Disk-first: if the workflow checked out the file we already
+        # have it. Don't burn a Contents API call on a file the
+        # extractor will read from disk anyway.
+        if (repo_root / fp).exists():
+            skipped_disk += 1
+            continue
+        content = github_client.get_file_content(fp, commit_sha)
+        if content is not None:
+            file_cache[fp] = content
+            fetched += 1
+
+    if fetched or skipped_disk:
+        logger.info(
+            "Manual prefetch gate: fetched=%d, on-disk=%d, non-analyzable=%d, total=%d",
+            fetched,
+            skipped_disk,
+            len(changed_file_paths) - len(worth_fetching),
+            len(changed_file_paths),
+        )
+    return file_cache
+
+
 def _get_oidc_token() -> str | None:
     from .llm.platform_keys import get_oidc_token
 
@@ -200,8 +284,9 @@ def main() -> None:
     orchestrator = LLMOrchestrator(providers, max_retries_per_provider=3)
 
     # For the manual path the repo is checked out, so the extractor reads files
-    # from disk. Pass a file_fetcher as fallback for any imported file that
-    # isn't in the checkout (e.g. a path the diff parser resolved differently).
+    # from disk first. Pass a file_fetcher as a lazy fallback for any imported
+    # file that isn't in the checkout (e.g. a path the diff parser resolved
+    # differently or a cross-file import outside a sparse checkout).
     _gh_client_for_fetch = (
         GitHubClient(cfg.github_token, cfg.repo) if cfg.github_token and cfg.repo else None
     )
@@ -210,12 +295,6 @@ def main() -> None:
         if _gh_client_for_fetch is None:
             return None
         return _gh_client_for_fetch.get_file_content(path, cfg.commit_sha)
-
-    engine = TriageEngine(
-        orchestrator,
-        repo_root=Path("."),
-        file_fetcher=_fetch_file,
-    )
 
     # Read diff
     diff_path = Path(cfg.diff_path)
@@ -228,6 +307,27 @@ def main() -> None:
         logger.info("Empty diff — nothing to analyze")
         print("## AegisDiff\n\nNo security-relevant code changes detected.")
         sys.exit(0)
+
+    # ── F7: Phase-1 gated prefetch ────────────────────────────────────────
+    # Pre-populate ``file_cache`` for ANALYZE / DEPRIORITIZE files that are
+    # *not* already on disk under the checked-out repo. Closes the manual-
+    # vs-App divergence where sparse-checkout / fetch-only setups silently
+    # lost primary-sink line resolution because the extractor saw only the
+    # diff text. Disk-first stays the source of truth — files in the
+    # checkout aren't fetched again.
+    _file_cache = build_manual_file_cache(
+        raw_diff,
+        repo_root=Path("."),
+        github_client=_gh_client_for_fetch,
+        commit_sha=cfg.commit_sha,
+    )
+
+    engine = TriageEngine(
+        orchestrator,
+        repo_root=Path("."),
+        file_cache=_file_cache,
+        file_fetcher=_fetch_file,
+    )
 
     t0 = time.monotonic()
     diff_lines = raw_diff.count("\n")
