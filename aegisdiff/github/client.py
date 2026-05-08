@@ -7,6 +7,8 @@ from typing import Optional
 
 import httpx
 
+from ._retry import request_with_retry
+
 logger = logging.getLogger(__name__)
 
 GITHUB_API_BASE = "https://api.github.com"
@@ -51,7 +53,14 @@ class GitHubClient:
     def _find_comment_with_marker(self, pr_number: int, marker: str) -> Optional[int]:
         url = f"{GITHUB_API_BASE}/repos/{self._repo}/issues/{pr_number}/comments"
         try:
-            resp = httpx.get(url, headers=self._headers, params={"per_page": 100}, timeout=15.0)
+            # GET is idempotent — safe to retry transient 5xx / network errors.
+            resp = request_with_retry(
+                "GET",
+                url,
+                headers=self._headers,
+                params={"per_page": 100},
+                timeout=15.0,
+            )
             resp.raise_for_status()
             for comment in resp.json():
                 if marker in comment.get("body", ""):
@@ -151,7 +160,11 @@ class GitHubClient:
             "tool_name": "AegisDiff",
         }
         try:
-            resp = httpx.post(url, headers=self._headers, json=payload, timeout=20.0)
+            # SARIF upload is replace-style for the same tool/ref/sha, so
+            # repeating the POST on a transient 5xx is safe enough.
+            resp = request_with_retry(
+                "POST", url, headers=self._headers, json=payload, timeout=20.0
+            )
             if resp.status_code == 403:
                 logger.warning(
                     "SARIF upload skipped — token lacks security-events:write "
@@ -184,7 +197,9 @@ class GitHubClient:
 
         url = f"{GITHUB_API_BASE}/repos/{self._repo}/contents/{path}"
         try:
-            resp = httpx.get(
+            # GET is idempotent — safe to retry transient 5xx / network.
+            resp = request_with_retry(
+                "GET",
                 url,
                 headers=self._headers,
                 params={"ref": ref},

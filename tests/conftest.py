@@ -8,6 +8,21 @@ import pytest
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
+@pytest.fixture(autouse=True)
+def _no_real_github_retry_sleep(monkeypatch):
+    """Replace ``aegisdiff.github._retry._sleep`` with a no-op for every test.
+
+    The retry helper waits 0.5s + 2.0s between attempts in production.
+    Tests that exercise the wrapper's failure paths would otherwise sit
+    in real sleeps for several seconds. Tests that *want* to inspect or
+    count sleep calls can override ``aegisdiff.github._retry._sleep``
+    again inside the test body.
+    """
+    import aegisdiff.github._retry as _retry
+
+    monkeypatch.setattr(_retry, "_sleep", lambda _seconds: None)
+
+
 def _load(name: str) -> str:
     return (FIXTURES_DIR / name).read_text()
 
