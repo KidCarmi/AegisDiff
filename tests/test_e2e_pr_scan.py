@@ -29,13 +29,14 @@ same pipeline against a synthetic 28-file diff that trips Large PR Risk
 Triage Mode (>25 changed files), and asserts the Large PR coverage block,
 banner, skip-reason buckets, LLM-call gating, and inline-post counter.
 """
+
 from __future__ import annotations
 
+import base64 as _b64
 import json
-import os
 import re
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -72,9 +73,7 @@ LLM_VERDICT_JSON = json.dumps(
             "subprocess.check_output with shell=True, enabling OS command injection. "
             "An attacker can supply report_name='; rm -rf /' to execute arbitrary commands."
         ),
-        "evidence": (
-            'subprocess.check_output(f"generate_report.sh {report_name}", shell=True)'
-        ),
+        "evidence": ('subprocess.check_output(f"generate_report.sh {report_name}", shell=True)'),
         "sanitizer_found": False,
         "sanitizer_description": None,
         "attack_vector": "report_name HTTP query parameter",
@@ -142,9 +141,6 @@ def _env_vars() -> dict:
     }
 
 
-import base64 as _b64
-
-
 def _b64_encode(text: str) -> str:
     return _b64.b64encode(text.encode()).decode()
 
@@ -182,14 +178,12 @@ class TestE2EPRScan:
         # ── Register all mocked HTTP routes ─────────────────────────────────
 
         # [3] Fetch PR diff (Accept: application/vnd.github.v3.diff)
-        diff_route = respx.get(
-            f"{GITHUB_API}/repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}"
-        ).mock(return_value=httpx.Response(200, text=SAMPLE_DIFF))
+        diff_route = respx.get(f"{GITHUB_API}/repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}").mock(
+            return_value=httpx.Response(200, text=SAMPLE_DIFF)
+        )
 
         # [4] Fetch full file content for code-context extractor
-        file_route = respx.get(
-            f"{GITHUB_API}/repos/{OWNER}/{REPO}/contents/app/views.py"
-        ).mock(
+        file_route = respx.get(f"{GITHUB_API}/repos/{OWNER}/{REPO}/contents/app/views.py").mock(
             return_value=httpx.Response(
                 200,
                 json={
@@ -205,14 +199,14 @@ class TestE2EPRScan:
         )
 
         # [6] Create inline review comment (may or may not be called depending on AST)
-        review_route = respx.post(
-            f"{GITHUB_API}/repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/reviews"
-        ).mock(return_value=httpx.Response(200, json={"id": 1}))
+        respx.post(f"{GITHUB_API}/repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/reviews").mock(
+            return_value=httpx.Response(200, json={"id": 1})
+        )
 
         # [7] List existing PR comments (none exist)
-        list_comments_route = respx.get(
-            f"{GITHUB_API}/repos/{OWNER}/{REPO}/issues/{PR_NUMBER}/comments"
-        ).mock(return_value=httpx.Response(200, json=[]))
+        respx.get(f"{GITHUB_API}/repos/{OWNER}/{REPO}/issues/{PR_NUMBER}/comments").mock(
+            return_value=httpx.Response(200, json=[])
+        )
 
         # [8] Create PR summary comment
         create_comment_route = respx.post(
@@ -220,14 +214,14 @@ class TestE2EPRScan:
         ).mock(return_value=httpx.Response(201, json={"id": 42}))
 
         # [9] Post commit status
-        status_route = respx.post(
-            f"{GITHUB_API}/repos/{OWNER}/{REPO}/statuses/{COMMIT_SHA}"
-        ).mock(return_value=httpx.Response(201, json={}))
+        status_route = respx.post(f"{GITHUB_API}/repos/{OWNER}/{REPO}/statuses/{COMMIT_SHA}").mock(
+            return_value=httpx.Response(201, json={})
+        )
 
         # [10] Upload SARIF to Code Scanning
-        sarif_route = respx.post(
-            f"{GITHUB_API}/repos/{OWNER}/{REPO}/code-scanning/sarifs"
-        ).mock(return_value=httpx.Response(202, json={"id": "sarif-abc"}))
+        sarif_route = respx.post(f"{GITHUB_API}/repos/{OWNER}/{REPO}/code-scanning/sarifs").mock(
+            return_value=httpx.Response(202, json={"id": "sarif-abc"})
+        )
 
         # [11] Send metadata to dashboard
         ingest_route = respx.post(INGEST_URL).mock(
@@ -284,7 +278,8 @@ class TestE2EPRScan:
             llm_payload = json.loads(llm_route.calls.last.request.content)
             user_msg = llm_payload["messages"][1]["content"]
             print(f"       Model     : {llm_payload['model']}")
-            print(f"       Diff sent : {'sample.diff content present' if 'subprocess' in user_msg else '?'}")
+            diff_state = "sample.diff content present" if "subprocess" in user_msg else "?"
+            print(f"       Diff sent : {diff_state}")
         print()
 
         verdict_data = json.loads(LLM_VERDICT_JSON)
@@ -301,9 +296,7 @@ class TestE2EPRScan:
         print(f"       POST /repos/{OWNER}/{REPO}/issues/{PR_NUMBER}/comments")
         print(f"       Called    : {'✓' if create_comment_route.called else '✗'}")
         if create_comment_route.called:
-            comment_body = json.loads(
-                create_comment_route.calls.last.request.content
-            )["body"]
+            comment_body = json.loads(create_comment_route.calls.last.request.content)["body"]
             first_line = comment_body.split("\n")[0]
             print(f"       Header    : {first_line}")
         print()
@@ -356,15 +349,20 @@ class TestE2EPRScan:
 
         # PR comment was posted
         assert create_comment_route.called, "Expected PR comment to be posted"
-        comment_body = json.loads(
-            create_comment_route.calls.last.request.content
-        )["body"]
+        comment_body = json.loads(create_comment_route.calls.last.request.content)["body"]
         assert "<!-- aegisdiff-report -->" in comment_body, "Expected AegisDiff marker in comment"
         # Comment should mention the vulnerability
-        assert any(
-            kw in comment_body
-            for kw in ("TRUE_POSITIVE", "true_positive", "True Positive", "HIGH", ":x:", ":red_circle:")
-        ), "Expected TRUE_POSITIVE indicator in PR comment"
+        tp_keywords = (
+            "TRUE_POSITIVE",
+            "true_positive",
+            "True Positive",
+            "HIGH",
+            ":x:",
+            ":red_circle:",
+        )
+        assert any(kw in comment_body for kw in tp_keywords), (
+            "Expected TRUE_POSITIVE indicator in PR comment"
+        )
 
         # Commit status posted with "failure" state (TRUE_POSITIVE blocks merge)
         assert status_route.called, "Expected commit status to be posted"
@@ -388,10 +386,7 @@ class TestE2EPRScan:
         assert item["pr_url"] == f"https://github.com/{OWNER}/{REPO}/pull/{PR_NUMBER}"
 
         # Authorization header was correct on GitHub API calls
-        assert (
-            status_route.calls.last.request.headers["Authorization"]
-            == f"Bearer {FAKE_TOKEN}"
-        )
+        assert status_route.calls.last.request.headers["Authorization"] == f"Bearer {FAKE_TOKEN}"
 
         # High-confidence TRUE_POSITIVE → pipeline exits with code 1 (blocks merge)
         assert exit_code == 1, (
@@ -429,12 +424,12 @@ class TestE2EPRScan:
             }
         )
 
-        respx.get(
-            f"{GITHUB_API}/repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}"
-        ).mock(return_value=httpx.Response(200, text=SAMPLE_DIFF))
-        respx.get(
-            f"{GITHUB_API}/repos/{OWNER}/{REPO}/contents/app/views.py"
-        ).mock(return_value=httpx.Response(404, json={"message": "Not Found"}))
+        respx.get(f"{GITHUB_API}/repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}").mock(
+            return_value=httpx.Response(200, text=SAMPLE_DIFF)
+        )
+        respx.get(f"{GITHUB_API}/repos/{OWNER}/{REPO}/contents/app/views.py").mock(
+            return_value=httpx.Response(404, json={"message": "Not Found"})
+        )
         respx.post(GITHUB_MODELS_URL).mock(
             return_value=httpx.Response(
                 200,
@@ -453,18 +448,18 @@ class TestE2EPRScan:
                 },
             )
         )
-        respx.get(
-            f"{GITHUB_API}/repos/{OWNER}/{REPO}/issues/{PR_NUMBER}/comments"
-        ).mock(return_value=httpx.Response(200, json=[]))
-        create_comment_route = respx.post(
-            f"{GITHUB_API}/repos/{OWNER}/{REPO}/issues/{PR_NUMBER}/comments"
-        ).mock(return_value=httpx.Response(201, json={"id": 43}))
-        status_route = respx.post(
-            f"{GITHUB_API}/repos/{OWNER}/{REPO}/statuses/{COMMIT_SHA}"
-        ).mock(return_value=httpx.Response(201, json={}))
-        respx.post(
-            f"{GITHUB_API}/repos/{OWNER}/{REPO}/code-scanning/sarifs"
-        ).mock(return_value=httpx.Response(202, json={"id": "sarif-fp"}))
+        respx.get(f"{GITHUB_API}/repos/{OWNER}/{REPO}/issues/{PR_NUMBER}/comments").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        respx.post(f"{GITHUB_API}/repos/{OWNER}/{REPO}/issues/{PR_NUMBER}/comments").mock(
+            return_value=httpx.Response(201, json={"id": 43})
+        )
+        status_route = respx.post(f"{GITHUB_API}/repos/{OWNER}/{REPO}/statuses/{COMMIT_SHA}").mock(
+            return_value=httpx.Response(201, json={})
+        )
+        respx.post(f"{GITHUB_API}/repos/{OWNER}/{REPO}/code-scanning/sarifs").mock(
+            return_value=httpx.Response(202, json={"id": "sarif-fp"})
+        )
         ingest_route = respx.post(INGEST_URL).mock(
             return_value=httpx.Response(200, json={"ok": True})
         )
@@ -472,9 +467,7 @@ class TestE2EPRScan:
         from aegisdiff.github.app_client import GitHubAppClient
 
         with (
-            patch.object(
-                GitHubAppClient, "get_installation_token", return_value=FAKE_TOKEN
-            ),
+            patch.object(GitHubAppClient, "get_installation_token", return_value=FAKE_TOKEN),
             patch("aegisdiff.llm.platform_keys.get_oidc_token", return_value=None),
         ):
             from aegisdiff.app_entrypoint import main
@@ -500,12 +493,10 @@ class TestE2EPRScan:
         assert item["verdict"] == "FALSE_POSITIVE"
 
         # Pipeline exits cleanly
-        assert exited_with == 0, (
-            f"Expected exit code 0 for FALSE_POSITIVE, got {exited_with}"
-        )
+        assert exited_with == 0, f"Expected exit code 0 for FALSE_POSITIVE, got {exited_with}"
 
-        print(f"\n  FALSE_POSITIVE → status=success, exit 0 ✓")
-        print(f"  Dashboard received verdict=FALSE_POSITIVE ✓")
+        print("\n  FALSE_POSITIVE → status=success, exit 0 ✓")
+        print("  Dashboard received verdict=FALSE_POSITIVE ✓")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -646,9 +637,9 @@ class TestE2ELargePRScan:
         assert file_count == 28, f"fixture changed shape: {file_count} files"
 
         # ── PR diff ─────────────────────────────────────────────────────────
-        diff_route = respx.get(
-            f"{GITHUB_API}/repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}"
-        ).mock(return_value=httpx.Response(200, text=large_pr_diff))
+        diff_route = respx.get(f"{GITHUB_API}/repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}").mock(
+            return_value=httpx.Response(200, text=large_pr_diff)
+        )
 
         # ── File contents — specific mock for the auth file (with sink),
         # catch-all 404 for everything else. The order matters: respx tries
@@ -664,9 +655,7 @@ class TestE2ELargePRScan:
                 },
             )
         )
-        contents_pattern = re.compile(
-            rf"^{re.escape(GITHUB_API)}/repos/{OWNER}/{REPO}/contents/.*"
-        )
+        contents_pattern = re.compile(rf"^{re.escape(GITHUB_API)}/repos/{OWNER}/{REPO}/contents/.*")
         catchall_content_route = respx.get(url__regex=contents_pattern).mock(
             return_value=httpx.Response(404, json={"message": "Not Found"})
         )
@@ -690,12 +679,12 @@ class TestE2ELargePRScan:
         ).mock(return_value=httpx.Response(201, json={"id": 99}))
 
         # ── Commit status, SARIF, dashboard ingest ─────────────────────────
-        status_route = respx.post(
-            f"{GITHUB_API}/repos/{OWNER}/{REPO}/statuses/{COMMIT_SHA}"
-        ).mock(return_value=httpx.Response(201, json={}))
-        sarif_route = respx.post(
-            f"{GITHUB_API}/repos/{OWNER}/{REPO}/code-scanning/sarifs"
-        ).mock(return_value=httpx.Response(202, json={"id": "sarif-large"}))
+        status_route = respx.post(f"{GITHUB_API}/repos/{OWNER}/{REPO}/statuses/{COMMIT_SHA}").mock(
+            return_value=httpx.Response(201, json={})
+        )
+        sarif_route = respx.post(f"{GITHUB_API}/repos/{OWNER}/{REPO}/code-scanning/sarifs").mock(
+            return_value=httpx.Response(202, json={"id": "sarif-large"})
+        )
         ingest_route = respx.post(INGEST_URL).mock(
             return_value=httpx.Response(200, json={"ok": True})
         )
@@ -703,9 +692,7 @@ class TestE2ELargePRScan:
         from aegisdiff.github.app_client import GitHubAppClient
 
         with (
-            patch.object(
-                GitHubAppClient, "get_installation_token", return_value=FAKE_TOKEN
-            ),
+            patch.object(GitHubAppClient, "get_installation_token", return_value=FAKE_TOKEN),
             patch("aegisdiff.llm.platform_keys.get_oidc_token", return_value=None),
         ):
             from aegisdiff.app_entrypoint import main
@@ -728,12 +715,12 @@ class TestE2ELargePRScan:
 
         # 2. Banner appears in summary PR comment.
         comment_body = json.loads(create_comment_route.calls.last.request.content)["body"]
-        assert (
-            "AegisDiff ran in Large PR Risk Triage Mode" in comment_body
-        ), "Large PR banner missing from summary comment"
-        assert (
-            "Large PR Risk Triage Mode coverage" in comment_body
-        ), "Large PR coverage <details> block missing"
+        assert "AegisDiff ran in Large PR Risk Triage Mode" in comment_body, (
+            "Large PR banner missing from summary comment"
+        )
+        assert "Large PR Risk Triage Mode coverage" in comment_body, (
+            "Large PR coverage <details> block missing"
+        )
 
         # 3. Coverage block reports the planned counts.
         assert "Files changed:" in comment_body
@@ -756,27 +743,25 @@ class TestE2ELargePRScan:
         for call in llm_route.calls:
             payload = json.loads(call.request.content)
             user_msg = payload["messages"][1]["content"]
-            assert (
-                large_pr_diff not in user_msg
-            ), "Large PR Mode must not send the full raw diff in one prompt"
+            assert large_pr_diff not in user_msg, (
+                "Large PR Mode must not send the full raw diff in one prompt"
+            )
             # Each prompt must carry the Large PR addendum so the model
             # applies the change-only constraints.
             sys_msg = payload["messages"][0]["content"]
-            assert (
-                "LARGE PR RISK TRIAGE MODE" in sys_msg
-            ), "Large PR addendum missing from system prompt"
-            assert (
-                "UNTRUSTED INPUT" in sys_msg
-            ), "Prompt-injection defense missing from system prompt"
+            assert "LARGE PR RISK TRIAGE MODE" in sys_msg, (
+                "Large PR addendum missing from system prompt"
+            )
+            assert "UNTRUSTED INPUT" in sys_msg, (
+                "Prompt-injection defense missing from system prompt"
+            )
 
         # 7. LLM call count respects the budget. With our fixture the only
         # ANALYZE-eligible files are 1 auth + 2 utility helpers; the test
         # file is DEPRIORITIZED but still gets a call once the analyze
         # files are covered. Default max_llm_calls_per_pr is 40; the run
         # must stay well within that.
-        assert llm_route.call_count <= 40, (
-            f"LLM call budget exceeded: {llm_route.call_count} > 40"
-        )
+        assert llm_route.call_count <= 40, f"LLM call budget exceeded: {llm_route.call_count} > 40"
         assert llm_route.call_count >= 1, "Expected at least one LLM call"
 
         # 8. Inline-comment count reflects only successful create_review
@@ -784,9 +769,7 @@ class TestE2ELargePRScan:
         # test file have no sinks, so they don't trigger inline reviews.
         if review_route.called:
             posted = review_route.call_count
-            assert (
-                f"Inline comments posted: **{posted}**" in comment_body
-            ), (
+            assert f"Inline comments posted: **{posted}**" in comment_body, (
                 f"Summary inline-post count out of sync with actual posts "
                 f"(posted={posted}, comment={comment_body!r})"
             )
@@ -809,8 +792,7 @@ class TestE2ELargePRScan:
 
         # 10. High-confidence TRUE_POSITIVE → exit 1 (blocks merge).
         assert exit_code == 1, (
-            f"Expected exit 1 for high-confidence TRUE_POSITIVE in Large PR "
-            f"Mode, got {exit_code}"
+            f"Expected exit 1 for high-confidence TRUE_POSITIVE in Large PR Mode, got {exit_code}"
         )
 
         # ── Trace output for human inspection ──────────────────────────────
