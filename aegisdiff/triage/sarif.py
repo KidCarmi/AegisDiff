@@ -85,6 +85,14 @@ def build_sarif(verdicts: List[Verdict], repo: str, commit_sha: str) -> dict:
     Only TRUE_POSITIVE and NEEDS_REVIEW findings are included.
     FALSE_POSITIVE and ERROR verdicts are excluded.
 
+    Result-level deduplication: chunked / Large PR Mode runs may produce
+    multiple actionable verdicts that point at the same finding location
+    (same CWE, same file, same line). Without dedup those would surface
+    as duplicate alerts in the GitHub Security tab. We collapse such
+    groups to a single result, keeping the highest-confidence verdict
+    (ties broken by first-occurrence order so output is deterministic).
+    Rule-level dedup (one rule per unique CWE) is preserved as before.
+
     Args:
         verdicts:    List of Verdict objects from the triage engine.
         repo:        Repository in "owner/name" format.
@@ -94,11 +102,30 @@ def build_sarif(verdicts: List[Verdict], repo: str, commit_sha: str) -> dict:
         v for v in verdicts if v.verdict in (VerdictType.TRUE_POSITIVE, VerdictType.NEEDS_REVIEW)
     ]
 
+    # ── Result-level dedup ────────────────────────────────────────────────
+    # Key: (normalised cwe_id, file_path, line_number). ``line_number=0``
+    # and ``line_number=None`` both mean "no specific line" and are
+    # normalised to ``None`` so they collapse together. Different CWEs at
+    # the same location stay separate; missing-location verdicts with
+    # different CWEs also stay separate.
+    groups: dict[tuple, Verdict] = {}
+    for v in actionable:
+        cwe_id = v.cwe_id if v.cwe_id and v.cwe_id != "N/A" else "AegisDiff/Finding"
+        line_key = v.line_number if (v.line_number and v.line_number > 0) else None
+        key = (cwe_id, v.file_path, line_key)
+        existing = groups.get(key)
+        if existing is None or v.confidence > existing.confidence:
+            groups[key] = v
+
+    # Iteration order is insertion order (CPython 3.7+ guarantee), which
+    # gives deterministic SARIF output for the same inputs.
+    deduped = list(groups.values())
+
     # Build deduplicated rules (one per unique CWE)
     seen_rules: dict[str, dict] = {}
     results: list[dict] = []
 
-    for v in actionable:
+    for v in deduped:
         cwe_id = v.cwe_id if v.cwe_id and v.cwe_id != "N/A" else "AegisDiff/Finding"
         level = _SEVERITY_TO_LEVEL.get(v.severity.value, "warning")
 

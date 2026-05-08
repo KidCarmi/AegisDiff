@@ -223,3 +223,178 @@ class TestEncodeSarif:
         raw_size = len(json.dumps(sarif).encode("utf-8"))
         encoded_size = len(base64.b64decode(encode_sarif(sarif)))
         assert encoded_size < raw_size
+
+
+# ── Result-level dedup ───────────────────────────────────────────────────────
+
+class TestSarifResultDedup:
+    """Chunked / Large PR Mode can produce multiple actionable verdicts that
+    point at the same finding location (same CWE + same file + same line).
+    Without dedup the GitHub Security tab would show duplicate alerts. We
+    collapse such groups to a single result, keeping the highest-confidence
+    verdict, while preserving rule-level dedup and TRUE_POSITIVE /
+    NEEDS_REVIEW filtering.
+    """
+
+    # 1. Same key → one result, highest-confidence kept
+    def test_dedup_collapses_same_cwe_same_file_same_line(self):
+        verdicts = [
+            _tp(cwe="CWE-78", file_path="src/auth/login.py", line_number=6, confidence=0.85),
+            _tp(cwe="CWE-78", file_path="src/auth/login.py", line_number=6, confidence=0.95),
+            _tp(cwe="CWE-78", file_path="src/auth/login.py", line_number=6, confidence=0.92),
+        ]
+        sarif = build_sarif(verdicts, REPO, SHA)
+        results = sarif["runs"][0]["results"]
+        assert len(results) == 1
+        # Highest-confidence verdict wins.
+        assert results[0]["properties"]["confidence"] == 0.95
+        # Rule-level dedup is also preserved.
+        rules = sarif["runs"][0]["tool"]["driver"]["rules"]
+        assert [r["id"] for r in rules] == ["CWE-78"]
+
+    # 2. Same file + same line + different CWE → two results
+    def test_dedup_keeps_separate_results_for_different_cwe_at_same_location(self):
+        verdicts = [
+            _tp(cwe="CWE-78", file_path="src/x.py", line_number=10),
+            _tp(cwe="CWE-89", file_path="src/x.py", line_number=10),
+        ]
+        sarif = build_sarif(verdicts, REPO, SHA)
+        results = sarif["runs"][0]["results"]
+        rule_ids = sorted(r["ruleId"] for r in results)
+        assert rule_ids == ["CWE-78", "CWE-89"]
+
+    # 3. Same file + different line → two results
+    def test_dedup_keeps_separate_results_for_different_lines_in_same_file(self):
+        verdicts = [
+            _tp(cwe="CWE-78", file_path="src/x.py", line_number=10),
+            _tp(cwe="CWE-78", file_path="src/x.py", line_number=42),
+        ]
+        sarif = build_sarif(verdicts, REPO, SHA)
+        results = sarif["runs"][0]["results"]
+        assert len(results) == 2
+        lines = sorted(
+            r["locations"][0]["physicalLocation"]["region"]["startLine"] for r in results
+        )
+        assert lines == [10, 42]
+
+    # 4. Different file + same CWE + same line → two results
+    def test_dedup_keeps_separate_results_for_different_files_at_same_line(self):
+        verdicts = [
+            _tp(cwe="CWE-78", file_path="src/a.py", line_number=10),
+            _tp(cwe="CWE-78", file_path="src/b.py", line_number=10),
+        ]
+        sarif = build_sarif(verdicts, REPO, SHA)
+        results = sarif["runs"][0]["results"]
+        assert len(results) == 2
+        uris = sorted(
+            r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] for r in results
+        )
+        assert uris == ["src/a.py", "src/b.py"]
+
+    # 5. Missing file_path / line_number must not be incorrectly collapsed
+    def test_dedup_does_not_collapse_different_cwes_when_location_missing(self):
+        verdicts = [
+            _tp(cwe="CWE-78", file_path=None, line_number=None),
+            _tp(cwe="CWE-89", file_path=None, line_number=None),
+        ]
+        sarif = build_sarif(verdicts, REPO, SHA)
+        results = sarif["runs"][0]["results"]
+        rule_ids = sorted(r["ruleId"] for r in results)
+        assert rule_ids == ["CWE-78", "CWE-89"]
+
+    def test_dedup_does_not_collapse_when_only_one_side_has_a_line_number(self):
+        # Same CWE + same file, but one has a line_number and one does not.
+        # These describe different locations to a reviewer — must not collapse.
+        verdicts = [
+            _tp(cwe="CWE-78", file_path="src/x.py", line_number=42),
+            _tp(cwe="CWE-78", file_path="src/x.py", line_number=None),
+        ]
+        sarif = build_sarif(verdicts, REPO, SHA)
+        results = sarif["runs"][0]["results"]
+        assert len(results) == 2
+
+    def test_dedup_collapses_missing_location_same_cwe(self):
+        # Two verdicts with identical key (same CWE, both file_path=None,
+        # both line_number=None) — these are indistinguishable to a SARIF
+        # consumer and SHOULD collapse, keeping the highest confidence.
+        verdicts = [
+            _tp(cwe="CWE-78", file_path=None, line_number=None, confidence=0.80),
+            _tp(cwe="CWE-78", file_path=None, line_number=None, confidence=0.94),
+        ]
+        sarif = build_sarif(verdicts, REPO, SHA)
+        results = sarif["runs"][0]["results"]
+        assert len(results) == 1
+        assert results[0]["properties"]["confidence"] == 0.94
+
+    def test_dedup_treats_line_zero_and_none_as_equivalent(self):
+        # ``line_number=0`` is the engine's "no real sink line" signal and
+        # the existing code skips the SARIF region for it. Both 0 and None
+        # mean "no specific line" so verdicts that differ only on that
+        # axis must collapse.
+        v_none = _tp(cwe="CWE-78", file_path="src/x.py", line_number=None, confidence=0.90)
+        v_zero = _tp(cwe="CWE-78", file_path="src/x.py", line_number=None, confidence=0.93)
+        v_zero.line_number = 0  # bypass the test helper which skips zero
+        sarif = build_sarif([v_none, v_zero], REPO, SHA)
+        results = sarif["runs"][0]["results"]
+        assert len(results) == 1
+        assert results[0]["properties"]["confidence"] == 0.93
+
+    # 6. encode_sarif round-trip after dedup
+    def test_encode_sarif_round_trip_after_dedup(self):
+        verdicts = [
+            _tp(cwe="CWE-78", file_path="src/x.py", line_number=10, confidence=0.80),
+            _tp(cwe="CWE-78", file_path="src/x.py", line_number=10, confidence=0.95),
+            _tp(cwe="CWE-89", file_path="src/y.py", line_number=22, confidence=0.91),
+        ]
+        sarif = build_sarif(verdicts, REPO, SHA)
+        recovered = json.loads(gzip.decompress(base64.b64decode(encode_sarif(sarif))))
+        results = recovered["runs"][0]["results"]
+        # Two unique locations after dedup.
+        assert len(results) == 2
+        assert recovered["version"] == "2.1.0"
+
+    # 7. build_sarif output is deterministic
+    def test_build_sarif_output_is_deterministic(self):
+        verdicts = [
+            _tp(cwe="CWE-78", file_path="src/x.py", line_number=10, confidence=0.95),
+            _tp(cwe="CWE-78", file_path="src/x.py", line_number=10, confidence=0.85),
+            _tp(cwe="CWE-89", file_path="src/y.py", line_number=22),
+            _nr(cwe="CWE-79"),
+        ]
+        first = build_sarif(verdicts, REPO, SHA)
+        second = build_sarif(verdicts, REPO, SHA)
+        # Byte-identical JSON serialization.
+        assert json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)
+        # Result order is deterministic too (insertion-order by first
+        # occurrence of each dedup key).
+        assert [r["ruleId"] for r in first["runs"][0]["results"]] == [
+            r["ruleId"] for r in second["runs"][0]["results"]
+        ]
+
+    def test_dedup_input_order_independence_of_highest_confidence_pick(self):
+        """Whichever order the high-confidence verdict arrives in, it wins."""
+        a = _tp(cwe="CWE-78", file_path="src/x.py", line_number=10, confidence=0.70)
+        b = _tp(cwe="CWE-78", file_path="src/x.py", line_number=10, confidence=0.95)
+        for ordering in ([a, b], [b, a]):
+            sarif = build_sarif(ordering, REPO, SHA)
+            results = sarif["runs"][0]["results"]
+            assert len(results) == 1
+            assert results[0]["properties"]["confidence"] == 0.95
+
+    def test_dedup_does_not_promote_filtered_verdicts(self):
+        """FALSE_POSITIVE / ERROR verdicts at the same location must not
+        accidentally become the kept verdict for the group — they were
+        excluded from ``actionable`` before dedup runs."""
+        actionable = _tp(cwe="CWE-78", file_path="src/x.py", line_number=10, confidence=0.72)
+        # Higher-confidence FP at the same location.
+        fp_at_same_spot = _fp()
+        fp_at_same_spot.cwe_id = "CWE-78"
+        fp_at_same_spot.file_path = "src/x.py"
+        fp_at_same_spot.line_number = 10
+        fp_at_same_spot.confidence = 0.99
+        sarif = build_sarif([actionable, fp_at_same_spot], REPO, SHA)
+        results = sarif["runs"][0]["results"]
+        assert len(results) == 1
+        # The actionable verdict survives, not the higher-confidence FP.
+        assert results[0]["properties"]["confidence"] == 0.72
+        assert results[0]["properties"]["verdict"] == "TRUE_POSITIVE"
