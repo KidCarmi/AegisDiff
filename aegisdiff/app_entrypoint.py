@@ -169,12 +169,48 @@ def main() -> None:
     # ── Fetch full file content for changed files ─────────────────────────────
     # The GitHub App path has no checked-out repo, so the extractor can't read
     # files from disk. We fetch each changed file's content via the Contents API
-    # and pass it as a cache so the extractor has full file context (not just diff).
+    # and pass it as a cache so the extractor has full file context.
+    #
+    # Phase-1 classification gate: SKIP files (docs / generated / static /
+    # minified) and DEPENDENCY_ONLY files (lockfiles) are NEVER analyzed by
+    # the LLM, so eagerly fetching their contents is wasted GitHub API
+    # traffic. We classify upfront on path metadata only (no diff content
+    # required) and skip the prefetch for those buckets. The lazy
+    # ``_fetch_file`` fallback below still covers any cross-file extractor
+    # lookup that would normally be served from the cache.
     import re as _re
 
-    changed_file_paths = _re.findall(r"^\+\+\+ b/(.+)$", raw_diff, _re.MULTILINE)
+    from .triage.engine import TriageEngine as _TriageEngine
+    from .triage.file_classifier import Decision, classify_files
+
+    # Use the existing diff splitter so the path list matches what the
+    # engine itself sees later — no risk of drift between the prefetch
+    # path list and the analysis path list.
+    _file_chunks = _TriageEngine._split_diff_by_file(raw_diff)
+    changed_file_paths = [path for path, _diff in _file_chunks]
+    if not changed_file_paths:
+        # Defensive fallback for diff shapes the splitter doesn't recognise
+        # (e.g. binary-only diffs). Keep the legacy regex behaviour so we
+        # don't silently drop content for unusual diffs.
+        changed_file_paths = _re.findall(r"^\+\+\+ b/(.+)$", raw_diff, _re.MULTILINE)
+
+    _classifications = classify_files(changed_file_paths)
+    _worth_fetching = {
+        c.path for c in _classifications if c.decision in (Decision.ANALYZE, Decision.DEPRIORITIZE)
+    }
+    _skipped_prefetch = len(changed_file_paths) - len(_worth_fetching)
+    if _skipped_prefetch > 0:
+        logger.info(
+            "Skipping content prefetch for %d non-analyzable file(s) "
+            "(skip / dependency_only) — saves Contents API calls",
+            _skipped_prefetch,
+        )
+
     file_cache: dict = {}
     for fp in changed_file_paths:
+        if fp not in _worth_fetching:
+            logger.debug("Prefetch skipped (Phase-1 classifier): %s", fp)
+            continue
         content = app_client.get_file_content(
             token=installation_token,
             owner=owner,

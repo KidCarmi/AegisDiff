@@ -795,6 +795,22 @@ class TestE2ELargePRScan:
             f"Expected exit 1 for high-confidence TRUE_POSITIVE in Large PR Mode, got {exit_code}"
         )
 
+        # 11. Phase-1 prefetch gate: of the 28 changed files, only the
+        # ANALYZE + DEPRIORITIZE buckets get a Contents API fetch
+        # (1 auth + 2 utils + 1 test = 4). The 24 SKIP / DEPENDENCY_ONLY
+        # files (12 docs + 8 generated + 3 assets + 1 lockfile) must NOT
+        # trigger any Contents calls. Auth file is mocked specifically;
+        # the other 3 land on the catch-all 404.
+        total_content_fetches = (
+            auth_content_route.call_count + catchall_content_route.call_count
+        )
+        assert total_content_fetches == 4, (
+            f"Phase-1 prefetch gate broken: expected 4 fetches "
+            f"(1 auth + 1 test + 2 utils), got {total_content_fetches} "
+            f"(auth={auth_content_route.call_count}, "
+            f"catchall={catchall_content_route.call_count})"
+        )
+
         # ── Trace output for human inspection ──────────────────────────────
         print("\n" + "=" * 70)
         print("  AegisDiff Large PR Mode E2E — Pipeline Trace")
