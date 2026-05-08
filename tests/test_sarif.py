@@ -398,3 +398,54 @@ class TestSarifResultDedup:
         # The actionable verdict survives, not the higher-confidence FP.
         assert results[0]["properties"]["confidence"] == 0.72
         assert results[0]["properties"]["verdict"] == "TRUE_POSITIVE"
+
+    # Codex review (P2): the dedup key must normalise file_path the same
+    # way the SARIF emission does, so verdicts that serialise to the same
+    # artifactLocation.uri also collapse.
+    def test_dedup_normalises_file_path_leading_slash(self):
+        """``/src/x.py`` and ``src/x.py`` both serialise to ``src/x.py``
+        in artifactLocation.uri; they MUST collapse to one result."""
+        verdicts = [
+            _tp(cwe="CWE-78", file_path="/src/x.py", line_number=10, confidence=0.85),
+            _tp(cwe="CWE-78", file_path="src/x.py", line_number=10, confidence=0.95),
+        ]
+        sarif = build_sarif(verdicts, REPO, SHA)
+        results = sarif["runs"][0]["results"]
+        assert len(results) == 1
+        # Highest-confidence verdict wins.
+        assert results[0]["properties"]["confidence"] == 0.95
+        # Output URI is the normalised form (no leading slash).
+        uri = results[0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+        assert uri == "src/x.py"
+
+    def test_dedup_normalises_multiple_leading_slashes(self):
+        """``lstrip("/")`` strips all leading slashes; dedup must too."""
+        verdicts = [
+            _tp(cwe="CWE-78", file_path="//src/x.py", line_number=10, confidence=0.80),
+            _tp(cwe="CWE-78", file_path="src/x.py", line_number=10, confidence=0.92),
+        ]
+        sarif = build_sarif(verdicts, REPO, SHA)
+        results = sarif["runs"][0]["results"]
+        assert len(results) == 1
+        assert results[0]["properties"]["confidence"] == 0.92
+
+    def test_dedup_collapses_falsy_file_paths_with_same_cwe(self):
+        """Both ``None`` and ``""`` render to the ``"."`` fallback
+        location, so they share a dedup bucket when CWE matches."""
+        v_none = _tp(cwe="CWE-78", file_path=None, line_number=None, confidence=0.80)
+        v_empty = _tp(cwe="CWE-78", file_path="", line_number=None, confidence=0.93)
+        sarif = build_sarif([v_none, v_empty], REPO, SHA)
+        results = sarif["runs"][0]["results"]
+        assert len(results) == 1
+        assert results[0]["properties"]["confidence"] == 0.93
+
+    def test_dedup_normalised_path_does_not_collapse_different_paths(self):
+        """Sanity: normalisation must not over-collapse. ``a/x.py`` and
+        ``b/x.py`` are still different paths after ``lstrip("/")``."""
+        verdicts = [
+            _tp(cwe="CWE-78", file_path="/a/x.py", line_number=10),
+            _tp(cwe="CWE-78", file_path="/b/x.py", line_number=10),
+        ]
+        sarif = build_sarif(verdicts, REPO, SHA)
+        results = sarif["runs"][0]["results"]
+        assert len(results) == 2

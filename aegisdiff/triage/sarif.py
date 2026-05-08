@@ -78,6 +78,22 @@ def _rule_for_cwe(cwe_id: str, level: str) -> dict:
     return rule
 
 
+def _file_path_dedup_key(file_path: str | None) -> str | None:
+    """Normalise a verdict's ``file_path`` the same way the SARIF emission
+    does, so verdicts that serialise to the same ``artifactLocation.uri``
+    share a dedup key.
+
+    Mirrors the per-result location logic below:
+      * Falsy values (``None``, ``""``) → fallback ``"."`` location;
+        bucketed as ``None`` so they collapse together.
+      * Non-falsy → ``lstrip("/")`` so ``"/src/x.py"`` and ``"src/x.py"``
+        — which both serialise to ``"src/x.py"`` — share the same key.
+    """
+    if not file_path:
+        return None
+    return file_path.lstrip("/")
+
+
 def build_sarif(verdicts: List[Verdict], repo: str, commit_sha: str) -> dict:
     """
     Build a SARIF 2.1.0 document from a list of Verdicts.
@@ -103,16 +119,22 @@ def build_sarif(verdicts: List[Verdict], repo: str, commit_sha: str) -> dict:
     ]
 
     # ── Result-level dedup ────────────────────────────────────────────────
-    # Key: (normalised cwe_id, file_path, line_number). ``line_number=0``
-    # and ``line_number=None`` both mean "no specific line" and are
-    # normalised to ``None`` so they collapse together. Different CWEs at
-    # the same location stay separate; missing-location verdicts with
-    # different CWEs also stay separate.
+    # Key: (normalised cwe_id, normalised file_path, line_number).
+    # ``file_path`` is normalised via ``_file_path_dedup_key`` to match
+    # how the SARIF emission later writes ``artifactLocation.uri`` — so
+    # ``"/src/x.py"`` and ``"src/x.py"`` (which both serialise to
+    # ``"src/x.py"``) share a key. Falsy paths bucket together because
+    # they all render to the ``"."`` fallback location.
+    # ``line_number=0`` and ``line_number=None`` both mean "no specific
+    # line" and are normalised to ``None`` so they collapse together.
+    # Different CWEs at the same location stay separate; missing-
+    # location verdicts with different CWEs also stay separate.
     groups: dict[tuple, Verdict] = {}
     for v in actionable:
         cwe_id = v.cwe_id if v.cwe_id and v.cwe_id != "N/A" else "AegisDiff/Finding"
         line_key = v.line_number if (v.line_number and v.line_number > 0) else None
-        key = (cwe_id, v.file_path, line_key)
+        file_key = _file_path_dedup_key(v.file_path)
+        key = (cwe_id, file_key, line_key)
         existing = groups.get(key)
         if existing is None or v.confidence > existing.confidence:
             groups[key] = v
