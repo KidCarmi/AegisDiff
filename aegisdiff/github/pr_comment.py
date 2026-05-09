@@ -51,12 +51,19 @@ def format_large_pr_summary(
     llm_calls_total: int,
     inline_findings_shown: Optional[int] = None,
     inline_findings_overflow: Optional[int] = None,
+    chunks_errored: Optional[int] = None,
 ) -> str:
     """Build the Large PR Risk Triage Mode block for the summary comment.
 
     Includes the mandated Phase 2 banner sentence verbatim, followed by a
     coverage table and budget usage. Returns an empty string when
     ``coverage`` is ``None`` so callers can append unconditionally.
+
+    ``chunks_errored`` (F4) — when set and >0, renders a "Chunks errored"
+    line so reviewers can see whether the scan's quality degraded from
+    LLM JSON-parse failures, all-providers-exhausted events, or
+    unexpected engine errors. The line is omitted on clean runs to keep
+    happy-path summaries quiet.
     """
     if coverage is None:
         return ""
@@ -76,6 +83,10 @@ def format_large_pr_summary(
             f" (+{overflow} additional findings in summary only)" if overflow > 0 else ""
         )
 
+    errored_line = ""
+    if chunks_errored is not None and chunks_errored > 0:
+        errored_line = f"\n- Chunks errored: **{chunks_errored} / {llm_calls_used}** ⚠️"
+
     return f"""
 <details><summary>📦 Large PR Risk Triage Mode coverage</summary>
 
@@ -86,7 +97,7 @@ def format_large_pr_summary(
 - Files skipped: **{coverage.files_skipped}**
 - Skip reasons:
 {skip_block}
-- LLM calls used: **{llm_calls_used} / {llm_calls_total}**
+- LLM calls used: **{llm_calls_used} / {llm_calls_total}**{errored_line}
 - Budget exhausted: **{budget_state}**
 - Large PR triggers: {reasons}{inline_line}
 
