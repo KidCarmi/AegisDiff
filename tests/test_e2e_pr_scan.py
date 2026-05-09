@@ -958,16 +958,19 @@ class TestE2EManualEntrypoint:
         assert "subprocess" in user_message
         assert "shell=True" in user_message
 
-        # Inline review route is registered so respx won't error if it is
-        # called. Whether it actually fires depends on whether the AST
-        # resolves a line_number for the primary sink — the manual path
-        # does not pre-populate file_cache the way app_entrypoint does, so
-        # the extractor relies on the lazy ``_fetch_file`` fallback. The
-        # spec only requires the inline route be *attempted or posted
-        # where expected* — both branches are valid here.
-        if review_route.called:
-            inline_payload = json.loads(review_route.calls.last.request.content)
-            assert inline_payload["commit_id"] == COMMIT_SHA
+        # Manual path now mirrors the App path: ``build_manual_file_cache``
+        # pre-populates the extractor's cache with the auth file content
+        # for ANALYZE / DEPRIORITIZE files that aren't on disk under the
+        # checked-out repo. The AST extractor then resolves a sink line
+        # for the subprocess(shell=True) call deterministically, so the
+        # inline review fires every time. Asserting it directly closes
+        # the conditional gap PR #6 had to live with before F7 landed.
+        assert review_route.called, (
+            "Manual TP path must post an inline review now that file_cache "
+            "is pre-populated for ANALYZE/DEPRIORITIZE files"
+        )
+        inline_payload = json.loads(review_route.calls.last.request.content)
+        assert inline_payload["commit_id"] == COMMIT_SHA
 
         # Summary comment posted with AegisDiff marker + TP indicators.
         assert create_comment_route.called
