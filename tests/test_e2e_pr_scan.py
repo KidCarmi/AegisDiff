@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import base64 as _b64
 import json
+import logging
 import re
 from pathlib import Path
 from unittest.mock import patch
@@ -801,9 +802,7 @@ class TestE2ELargePRScan:
         # files (12 docs + 8 generated + 3 assets + 1 lockfile) must NOT
         # trigger any Contents calls. Auth file is mocked specifically;
         # the other 3 land on the catch-all 404.
-        total_content_fetches = (
-            auth_content_route.call_count + catchall_content_route.call_count
-        )
+        total_content_fetches = auth_content_route.call_count + catchall_content_route.call_count
         assert total_content_fetches == 4, (
             f"Phase-1 prefetch gate broken: expected 4 fetches "
             f"(1 auth + 1 test + 2 utils), got {total_content_fetches} "
@@ -1174,3 +1173,244 @@ class TestE2EManualEntrypoint:
         print(f"  Catch-all 404s  : {catchall_content_route.call_count}")
         print(f"  Exit code       : {exit_code}")
         print("=" * 70 + "\n")
+
+    # ── F12: fallback paths ──────────────────────────────────────────────
+
+    # The no-PR-context branch in entrypoint.py:385 fires when *any* of
+    # ``cfg.pr_number``, ``cfg.github_token``, or ``cfg.repo`` is falsy.
+    # The matrix below covers each axis explicitly, plus the empty-string
+    # variant of ``PR_NUMBER`` (the most common workflow misconfiguration).
+    @pytest.mark.parametrize(
+        "case_name,delete_keys,override_keys",
+        [
+            # PR_NUMBER absent — github_client IS still built, manual
+            # prefetch DOES run, /contents API mocks are exercised.
+            ("missing_pr_number", ("PR_NUMBER",), {}),
+            # Empty-string PR_NUMBER — Config parses "" → pr_number=None
+            # and the gate falls through identically.
+            ("empty_pr_number", (), {"PR_NUMBER": ""}),
+            # GITHUB_TOKEN absent — github_client is NOT built (no
+            # prefetch at all), AND the GitHub Models provider can't be
+            # added, so we must wire OpenRouter as the fallback provider.
+            (
+                "missing_github_token",
+                ("GITHUB_TOKEN",),
+                {"OPENROUTER_API_KEY": "test-or-key"},
+            ),
+            # REPO absent — github_client is NOT built (no prefetch),
+            # GitHub Models provider still works via GITHUB_TOKEN.
+            ("missing_repo", ("REPO",), {}),
+        ],
+    )
+    @respx.mock
+    def test_full_pipeline_manual_no_pr_context_prints_to_stdout(
+        self, capsys, monkeypatch, tmp_path, case_name, delete_keys, override_keys
+    ):
+        """No PR context → engine still runs end-to-end (LLM is called),
+        but every PR-side GitHub API (inline review / summary comment /
+        commit status / SARIF upload) is silent and the verdict is
+        printed to stdout instead. Strict respx with no PR-side routes
+        registered is the negative-space assertion that proves none were
+        called.
+
+        The gate at ``entrypoint.py:385`` is:
+            ``if cfg.pr_number and cfg.github_token and cfg.repo:``
+        Any of the three being falsy must trigger the same stdout
+        fallback — this matrix exercises each axis.
+        """
+        diff_file = tmp_path / "pr.diff"
+        diff_file.write_text(SAMPLE_DIFF)
+        step_summary = tmp_path / "step_summary.md"
+        step_summary.write_text("")
+
+        # Always start from a clean provider-key slate so no ambient
+        # OPENROUTER / GROQ key leaks into the orchestrator's failover
+        # order. Override keys are re-applied per case.
+        for key in _PROVIDER_ENV_KEYS_TO_CLEAR:
+            monkeypatch.delenv(key, raising=False)
+
+        env = _manual_env_vars(str(diff_file), str(step_summary))
+        # The "no PR context" contract is about GitHub PR APIs being
+        # silent — ingest is a separate concern; drop it for clarity.
+        env.pop("AEGISDIFF_INGEST_URL", None)
+        env.pop("AEGISDIFF_REPO_TOKEN", None)
+        for key in delete_keys:
+            env.pop(key, None)
+        env.update(override_keys)
+        for key, val in env.items():
+            monkeypatch.setenv(key, val)
+        # Defensive delenv (in case the parent process leaked a value
+        # for a key the case wants absent).
+        for key in delete_keys:
+            monkeypatch.delenv(key, raising=False)
+        monkeypatch.delenv("AEGISDIFF_INGEST_URL", raising=False)
+        monkeypatch.delenv("AEGISDIFF_REPO_TOKEN", raising=False)
+
+        # ── Mocks ────────────────────────────────────────────────────────
+        # Contents API: only used when github_client IS built (i.e. when
+        # both GITHUB_TOKEN and REPO are present). Registering them is
+        # harmless when github_client is None — strict respx tolerates
+        # unused routes; only unmocked *calls* raise.
+        respx.get(f"{GITHUB_API}/repos/{OWNER}/{REPO}/contents/app/views.py").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "encoding": "base64",
+                    "content": _b64_encode(FILE_CONTENT_PYTHON),
+                },
+            )
+        )
+        contents_pattern = re.compile(rf"^{re.escape(GITHUB_API)}/repos/{OWNER}/{REPO}/contents/.*")
+        respx.get(url__regex=contents_pattern).mock(
+            return_value=httpx.Response(404, json={"message": "Not Found"})
+        )
+
+        # LLM: register both providers' endpoints so any case can resolve.
+        # Whichever the orchestrator actually picks will be hit; the
+        # other route stays unused.
+        false_positive_verdict = json.dumps(
+            {
+                "verdict": "FALSE_POSITIVE",
+                "severity": "N/A",
+                "cwe_id": "N/A",
+                "confidence": 0.93,
+                "title": "No exploitable vulnerability",
+                "summary": "Allowlist guards the subprocess call.",
+                "evidence": "",
+                "sanitizer_found": True,
+                "sanitizer_description": "Allowlist before subprocess",
+                "attack_vector": None,
+                "remediation": None,
+                "false_positive_reason": "Validated against allowlist",
+            }
+        )
+        llm_response_payload = {
+            **GITHUB_MODELS_RESPONSE,
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": false_positive_verdict,
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+        }
+        github_models_route = respx.post(GITHUB_MODELS_URL).mock(
+            return_value=httpx.Response(200, json=llm_response_payload)
+        )
+        from aegisdiff.llm.providers.openrouter import OPENROUTER_API_URL
+
+        openrouter_route = respx.post(OPENROUTER_API_URL).mock(
+            return_value=httpx.Response(200, json=llm_response_payload)
+        )
+
+        # NO PR-side routes registered. Strict respx will raise if any
+        # of /reviews, /issues/{n}/comments, /statuses/{sha}, or
+        # /code-scanning/sarifs is hit — that's how we assert silence.
+
+        with patch("aegisdiff.llm.platform_keys.get_oidc_token", return_value=None):
+            from aegisdiff.entrypoint import main
+
+            try:
+                main()
+                exit_code = 0
+            except SystemExit as e:
+                exit_code = e.code
+
+        # At least one provider must have served the analysis.
+        total_llm_calls = github_models_route.call_count + openrouter_route.call_count
+        assert total_llm_calls >= 1, (
+            f"[{case_name}] Expected the engine to call an LLM; "
+            f"GitHub Models={github_models_route.call_count}, "
+            f"OpenRouter={openrouter_route.call_count}"
+        )
+
+        # Stdout carries the formatted verdict comment with stable markers.
+        captured = capsys.readouterr()
+        assert "<!-- aegisdiff-report -->" in captured.out, (
+            f"[{case_name}] no-PR-context fallback must print the AegisDiff comment marker"
+        )
+        assert "AegisDiff Security Triage" in captured.out, (
+            f"[{case_name}] missing 'AegisDiff Security Triage' header in stdout"
+        )
+        assert "FALSE_POSITIVE" in captured.out, (
+            f"[{case_name}] missing 'FALSE_POSITIVE' wording in stdout"
+        )
+
+        # FALSE_POSITIVE → exit 0 in every case.
+        assert exit_code == 0, f"[{case_name}] expected exit 0 for FALSE_POSITIVE, got {exit_code}"
+
+        print(
+            f"\n  [{case_name}] LLM={total_llm_calls}  exit={exit_code}  "
+            f"(GitHub Models={github_models_route.call_count}, "
+            f"OpenRouter={openrouter_route.call_count})"
+        )
+
+    @respx.mock
+    def test_full_pipeline_manual_missing_diff_path_exits_1(self, monkeypatch, tmp_path, caplog):
+        """``DIFF_PATH`` points at a nonexistent file → exit 1, no HTTP
+        traffic. ``respx`` strict mode catches any accidental call."""
+        missing_diff = tmp_path / "does_not_exist.diff"
+        # Deliberately do NOT create the file.
+
+        for key in _PROVIDER_ENV_KEYS_TO_CLEAR:
+            monkeypatch.delenv(key, raising=False)
+        env = _manual_env_vars(str(missing_diff))
+        env.pop("AEGISDIFF_INGEST_URL")
+        env.pop("AEGISDIFF_REPO_TOKEN")
+        for key, val in env.items():
+            monkeypatch.setenv(key, val)
+        monkeypatch.delenv("AEGISDIFF_INGEST_URL", raising=False)
+        monkeypatch.delenv("AEGISDIFF_REPO_TOKEN", raising=False)
+
+        # No HTTP routes registered. Strict respx asserts no calls happen.
+
+        with patch("aegisdiff.llm.platform_keys.get_oidc_token", return_value=None):
+            from aegisdiff.entrypoint import main
+
+            with caplog.at_level(logging.ERROR, logger="aegisdiff.entrypoint"):
+                with pytest.raises(SystemExit) as exc_info:
+                    main()
+
+        assert exc_info.value.code == 1
+        # Informative log assertion — the error message is a stable
+        # contract for operators reading workflow logs.
+        diff_not_found_records = [
+            r
+            for r in caplog.records
+            if "Diff file not found" in r.getMessage() and r.levelno == logging.ERROR
+        ]
+        assert diff_not_found_records, "missing DIFF_PATH must log a 'Diff file not found' ERROR"
+
+    @respx.mock
+    def test_full_pipeline_manual_empty_diff_exits_0(self, capsys, monkeypatch, tmp_path):
+        """Empty / whitespace-only diff → exit 0 with the friendly
+        stdout message; no LLM call, no GitHub HTTP, no ingest."""
+        empty_diff = tmp_path / "empty.diff"
+        empty_diff.write_text("")
+
+        for key in _PROVIDER_ENV_KEYS_TO_CLEAR:
+            monkeypatch.delenv(key, raising=False)
+        env = _manual_env_vars(str(empty_diff))
+        env.pop("AEGISDIFF_INGEST_URL")
+        env.pop("AEGISDIFF_REPO_TOKEN")
+        for key, val in env.items():
+            monkeypatch.setenv(key, val)
+        monkeypatch.delenv("AEGISDIFF_INGEST_URL", raising=False)
+        monkeypatch.delenv("AEGISDIFF_REPO_TOKEN", raising=False)
+
+        # No HTTP routes registered. The empty-diff branch exits before
+        # any LLM / GitHub call; strict respx catches regressions.
+
+        with patch("aegisdiff.llm.platform_keys.get_oidc_token", return_value=None):
+            from aegisdiff.entrypoint import main
+
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+
+        assert exc_info.value.code == 0
+        out = capsys.readouterr().out
+        assert "## AegisDiff" in out
+        assert "No security-relevant code changes detected" in out
