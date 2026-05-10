@@ -401,6 +401,7 @@ def main() -> None:
             llm_calls_total=large_pr_run.llm_calls_budget_total,
             inline_findings_shown=inline_posted_count,
             inline_findings_overflow=inline_overflow,
+            chunks_errored=large_pr_run.chunks_errored,
         )
     comment_body = format_summary_comment(
         verdict,

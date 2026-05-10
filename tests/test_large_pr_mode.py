@@ -1384,3 +1384,235 @@ def test_inline_overflow_independent_of_post_success():
     selected, overflow = select_inline_findings(eligible, max_inline_comments=10)
     assert len(selected) == 10
     assert overflow == 5  # still 5 regardless of how many of the 10 actually post
+
+
+# ── F4: errored-chunk visibility in Large PR Mode ────────────────────────
+
+
+def _malformed_response(text: str = "this is not valid json {{{") -> LLMResponse:
+    """LLM response whose body cannot be parsed by ``parse_verdict``."""
+    return LLMResponse(
+        content=text,
+        provider="mock",
+        model="mock-llama",
+        input_tokens=10,
+        output_tokens=10,
+        latency_ms=50.0,
+    )
+
+
+def test_chunks_errored_zero_on_clean_run():
+    """All chunks return valid TRUE_POSITIVE / FALSE_POSITIVE → no errors."""
+    raw = _build_diff(num_files=26, lines_per_file=2, prefix="src/auth/h")
+    detection = detect_large_pr(
+        changed_files=26, added_lines=52, total_diff_bytes=len(raw.encode("utf-8"))
+    )
+    engine, _ = _make_engine_with_recording_orchestrator()
+    result = engine.analyze_diff_large_pr_mode(raw, detection)
+
+    assert result.chunks_errored == 0
+    assert all(v.verdict != VerdictType.ERROR for v in result.verdicts)
+
+
+def test_chunks_errored_counts_json_parse_failures():
+    """Malformed LLM JSON → ``parse_verdict`` returns Verdict.error → counted."""
+    raw = _build_diff(num_files=26, lines_per_file=2, prefix="src/auth/h")
+    budgets = LargePRBudgets(max_files_analyzed=3, max_chunks_per_file=1, max_llm_calls_per_pr=3)
+    detection = detect_large_pr(
+        changed_files=26,
+        added_lines=52,
+        total_diff_bytes=len(raw.encode("utf-8")),
+        budgets=budgets,
+    )
+
+    orch = MagicMock(spec=LLMOrchestrator)
+    # 1 valid → 2 malformed → engine emits 1 normal verdict + 2 ERRORs.
+    orch.complete.side_effect = [
+        _llm_response(_fp_json()),
+        _malformed_response(),
+        _malformed_response("```{ broken"),
+    ]
+    engine = TriageEngine(orch, repo_root=Path("."))
+
+    result = engine.analyze_diff_large_pr_mode(raw, detection)
+
+    assert orch.complete.call_count == 3
+    assert result.chunks_errored == 2
+    error_verdicts = [v for v in result.verdicts if v.verdict == VerdictType.ERROR]
+    assert len(error_verdicts) == 2
+    # And the chunks-errored count tracks LLM-call usage correctly.
+    assert result.llm_calls_budget_used == 3
+
+
+def test_chunks_errored_counts_provider_exhaustion():
+    """Orchestrator RuntimeError (all providers exhausted) → Verdict.error
+    → counted as one errored chunk."""
+    raw = _build_diff(num_files=26, lines_per_file=2, prefix="src/auth/h")
+    budgets = LargePRBudgets(max_files_analyzed=2, max_chunks_per_file=1, max_llm_calls_per_pr=2)
+    detection = detect_large_pr(
+        changed_files=26,
+        added_lines=52,
+        total_diff_bytes=len(raw.encode("utf-8")),
+        budgets=budgets,
+    )
+
+    orch = MagicMock(spec=LLMOrchestrator)
+    # First chunk: providers exhausted; second chunk: success.
+    orch.complete.side_effect = [
+        RuntimeError("All LLM providers exhausted. Last error: 503"),
+        _llm_response(_fp_json()),
+    ]
+    engine = TriageEngine(orch, repo_root=Path("."))
+
+    result = engine.analyze_diff_large_pr_mode(raw, detection)
+
+    assert orch.complete.call_count == 2
+    assert result.chunks_errored == 1
+    assert result.llm_calls_budget_used == 2
+
+
+def test_chunks_errored_does_not_count_no_op_or_suppressed():
+    """``Verdict.no_op()`` and ``Verdict.suppressed()`` are FALSE_POSITIVE,
+    not ERROR — they must not inflate the errored-chunk count."""
+    no_op = Verdict.no_op()
+    suppressed = Verdict.suppressed(cwe_id="CWE-89", reason="test-only")
+
+    # Sanity: both are FALSE_POSITIVE, so ``v.verdict == ERROR`` is False.
+    assert no_op.verdict == VerdictType.FALSE_POSITIVE
+    assert suppressed.verdict == VerdictType.FALSE_POSITIVE
+    # The ERROR-counting expression mirrors the engine's:
+    chunks_errored = sum(
+        1 for v in [no_op, suppressed] if v.verdict == VerdictType.ERROR
+    )
+    assert chunks_errored == 0
+
+
+def test_chunks_errored_does_not_count_budget_exhausted_unrun_chunks():
+    """Chunks dropped via ``max_llm_calls_per_pr`` cutoff produce no
+    verdict at all — the post-loop counter cannot inflate from them."""
+    # 5 selectable files, but only 2 LLM calls allowed.
+    raw = _build_diff(num_files=26, lines_per_file=2, prefix="src/auth/h")
+    budgets = LargePRBudgets(max_files_analyzed=5, max_chunks_per_file=1, max_llm_calls_per_pr=2)
+    detection = detect_large_pr(
+        changed_files=26,
+        added_lines=52,
+        total_diff_bytes=len(raw.encode("utf-8")),
+        budgets=budgets,
+    )
+
+    engine, orch = _make_engine_with_recording_orchestrator()
+    result = engine.analyze_diff_large_pr_mode(raw, detection)
+
+    assert orch.complete.call_count == 2
+    assert result.budget_exhausted is True
+    # Two chunks ran successfully; three were skipped without producing
+    # a verdict. None of those skipped chunks must show up as "errored".
+    assert result.chunks_errored == 0
+
+
+def test_chunks_errored_counts_unexpected_engine_exception(monkeypatch):
+    """An unexpected exception inside the engine (extractor crash, etc.)
+    is caught by ``analyze_diff`` and turned into a ``Verdict.error`` —
+    must be counted as an errored chunk."""
+    raw = _build_diff(num_files=26, lines_per_file=2, prefix="src/auth/h")
+    budgets = LargePRBudgets(max_files_analyzed=1, max_chunks_per_file=1, max_llm_calls_per_pr=1)
+    detection = detect_large_pr(
+        changed_files=26,
+        added_lines=52,
+        total_diff_bytes=len(raw.encode("utf-8")),
+        budgets=budgets,
+    )
+
+    # Force the extractor instantiation to blow up. ``analyze_diff``'s
+    # ``except Exception`` block catches it and returns Verdict.error.
+    import aegisdiff.triage.engine as eng
+
+    real_extractor = eng.CodeContextExtractor
+
+    def _exploding_ctor(*args, **kwargs):
+        raise RuntimeError("simulated extractor failure")
+
+    monkeypatch.setattr(eng, "CodeContextExtractor", _exploding_ctor)
+    try:
+        engine, _ = _make_engine_with_recording_orchestrator()
+        result = engine.analyze_diff_large_pr_mode(raw, detection)
+    finally:
+        monkeypatch.setattr(eng, "CodeContextExtractor", real_extractor)
+
+    assert result.chunks_errored == 1
+    error_verdicts = [v for v in result.verdicts if v.verdict == VerdictType.ERROR]
+    assert len(error_verdicts) == 1
+    # The error title must carry the failure reason for operator triage.
+    assert "simulated extractor failure" in error_verdicts[0].summary
+
+
+# ── F4: summary rendering ─────────────────────────────────────────────────
+
+
+def _bare_coverage():
+    detection = detect_large_pr(
+        changed_files=30, added_lines=2_000, total_diff_bytes=600_000
+    )
+    return build_coverage_metadata(detection, SelectionResult(), files_changed=30)
+
+
+def test_summary_omits_chunks_errored_line_when_zero():
+    """Happy-path runs must not render the Chunks errored line."""
+    block = format_large_pr_summary(
+        _bare_coverage(),
+        llm_calls_used=10,
+        llm_calls_total=40,
+        chunks_errored=0,
+    )
+    assert "Chunks errored" not in block
+
+
+def test_summary_omits_chunks_errored_line_when_none():
+    """Callers that don't pass the kwarg get the legacy summary shape."""
+    block = format_large_pr_summary(
+        _bare_coverage(),
+        llm_calls_used=10,
+        llm_calls_total=40,
+    )
+    assert "Chunks errored" not in block
+
+
+def test_summary_renders_chunks_errored_when_nonzero():
+    """A single errored chunk surfaces the warning line with the
+    mandated ``M / K ⚠️`` shape."""
+    block = format_large_pr_summary(
+        _bare_coverage(),
+        llm_calls_used=10,
+        llm_calls_total=40,
+        chunks_errored=3,
+    )
+    assert "Chunks errored: **3 / 10** ⚠️" in block
+
+
+def test_summary_renders_when_all_chunks_errored():
+    """Pathological case: every chunk errored. Line still renders."""
+    block = format_large_pr_summary(
+        _bare_coverage(),
+        llm_calls_used=5,
+        llm_calls_total=40,
+        chunks_errored=5,
+    )
+    assert "Chunks errored: **5 / 5** ⚠️" in block
+
+
+# ── F4: entrypoint wiring (source-pattern guard) ──────────────────────────
+
+
+def test_both_entrypoints_pass_chunks_errored_to_summary():
+    """Source-level guarantee: both entrypoints thread
+    ``large_pr_run.chunks_errored`` into ``format_large_pr_summary`` so a
+    future refactor can't quietly drop the visibility."""
+    import aegisdiff.app_entrypoint as app_ep
+    import aegisdiff.entrypoint as ep
+
+    for module in (ep, app_ep):
+        text = Path(module.__file__).read_text()
+        assert "chunks_errored=large_pr_run.chunks_errored" in text, (
+            f"{Path(module.__file__).name}: chunks_errored not wired into "
+            f"format_large_pr_summary"
+        )

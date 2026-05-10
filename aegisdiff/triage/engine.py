@@ -250,6 +250,14 @@ class LargePRRunResult:
     llm_calls_budget_total: int = 0
     budget_exhausted: bool = False
     chunks_trimmed: int = 0  # how many sub-chunks were byte-trimmed before LLM
+    # Number of sub-chunks whose final Verdict was ``VerdictType.ERROR``
+    # — covers JSON parse failures from malformed LLM output, all-
+    # providers-exhausted ``RuntimeError`` from the orchestrator, and
+    # any unexpected engine / extractor exception caught by
+    # ``analyze_diff``. Does NOT count ``Verdict.no_op()`` or
+    # ``Verdict.suppressed()`` (both FALSE_POSITIVE) or chunks that
+    # never ran because the LLM-call budget was exhausted first.
+    chunks_errored: int = 0
 
 
 class TriageEngine:
@@ -611,6 +619,14 @@ class TriageEngine:
         coverage_budget_exhausted = coverage.budget_exhausted or budget_exhausted_calls
         coverage.budget_exhausted = coverage_budget_exhausted
 
+        # Count chunk-level ERROR verdicts produced during this run.
+        # Only counts verdicts that came back from ``analyze_diff`` —
+        # chunks that never ran (LLM budget exhausted before reaching
+        # them) produce no verdict and are excluded by construction.
+        # ``Verdict.no_op`` and ``Verdict.suppressed`` are FALSE_POSITIVE,
+        # so they are NOT counted here either.
+        chunks_errored = sum(1 for v in verdicts if v.verdict == VerdictType.ERROR)
+
         return LargePRRunResult(
             verdicts=verdicts or [Verdict.no_op()],
             coverage=coverage,
@@ -619,6 +635,7 @@ class TriageEngine:
             llm_calls_budget_total=max_llm_calls,
             budget_exhausted=coverage_budget_exhausted,
             chunks_trimmed=chunks_trimmed,
+            chunks_errored=chunks_errored,
         )
 
     @staticmethod
