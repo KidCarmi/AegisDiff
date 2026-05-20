@@ -178,3 +178,60 @@ class TestInvalidJsonEscapeSanitization:
         # This is invalid JSON even after sanitization — must return ERROR, not raise
         verdict = parse_verdict(raw)
         assert isinstance(verdict, Verdict)  # must return Verdict, not raise
+
+
+class TestUnescapedQuoteRecovery:
+    """The LLM is told to quote source code in the `evidence` field. When the
+    quoted code contains `"` and the model forgets to escape it, the JSON
+    string is terminated early and json.loads fails with
+    "Expecting ',' delimiter". parse_verdict() must repair and recover."""
+
+    def _broken(self, evidence: str) -> str:
+        """Build raw JSON with an unescaped-quote `evidence` value."""
+        return (
+            '{"verdict":"TRUE_POSITIVE","severity":"HIGH","cwe_id":"CWE-78",'
+            '"confidence":0.9,"title":"shell injection",'
+            '"summary":"unsanitized input flows to subprocess",'
+            f'"evidence":"{evidence}",'
+            '"sanitizer_found":false,"sanitizer_description":null,'
+            '"attack_vector":"shell metachars","remediation":"use shlex.quote",'
+            '"false_positive_reason":null}'
+        )
+
+    def test_single_unescaped_quote_in_evidence(self):
+        raw = self._broken('subprocess.run(f"echo {x}", shell=True)')
+        verdict = parse_verdict(raw)
+        assert verdict.verdict == VerdictType.TRUE_POSITIVE, verdict.summary
+        assert "echo" in verdict.evidence
+
+    def test_multiple_unescaped_quotes_in_evidence(self):
+        raw = self._broken('os.system("rm -rf " + path + " && echo done")')
+        verdict = parse_verdict(raw)
+        assert verdict.verdict == VerdictType.TRUE_POSITIVE, verdict.summary
+        assert "rm -rf" in verdict.evidence
+
+    def test_unescaped_quote_in_summary_field(self):
+        raw = (
+            '{"verdict":"TRUE_POSITIVE","severity":"HIGH","cwe_id":"CWE-89",'
+            '"confidence":0.85,"title":"sqli",'
+            '"summary":"The call cursor.execute("SELECT ...") is unsafe.",'
+            '"evidence":"x","sanitizer_found":false,"sanitizer_description":null,'
+            '"attack_vector":"a","remediation":"r","false_positive_reason":null}'
+        )
+        verdict = parse_verdict(raw)
+        assert verdict.verdict == VerdictType.TRUE_POSITIVE, verdict.summary
+        assert "cursor.execute" in verdict.summary
+
+    def test_already_escaped_quotes_preserved(self):
+        """Valid JSON with properly-escaped \\" must round-trip unchanged."""
+        payload = {**VALID_JSON, "evidence": 'call("foo")'}
+        raw = json.dumps(payload)
+        verdict = parse_verdict(raw)
+        assert verdict.verdict == VerdictType.TRUE_POSITIVE
+        assert verdict.evidence == 'call("foo")'
+
+    def test_irrecoverable_garbage_still_errors(self):
+        """Truly malformed input (not just unescaped quotes) returns ERROR."""
+        verdict = parse_verdict("{not even close to json")
+        assert verdict.verdict == VerdictType.ERROR
+        assert "JSON parse failure" in verdict.summary

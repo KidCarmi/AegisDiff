@@ -137,6 +137,87 @@ class Verdict:
         )
 
 
+_VALUE_STARTERS = set('"{[-tfn0123456789')
+
+
+def _looks_like_terminator(text: str, i: int) -> bool:
+    """Decide whether ``text[i]`` (a ``"``) plausibly terminates a JSON string.
+
+    Local lookahead is not enough — an unescaped inner quote inside a code
+    snippet often happens to be followed by ``,`` (e.g. ``f"echo {x}", shell=...``).
+    So we look one structural element further: after ``,`` the next non-space
+    must start a new key/value, and after ``:`` we must be inside an object key.
+    """
+    n = len(text)
+    j = i + 1
+    while j < n and text[j] in " \t\r\n":
+        j += 1
+    if j >= n:
+        return True
+    c = text[j]
+    if c in "}]":
+        return True
+    if c == ":":
+        return True  # closing a key — value follows
+    if c == ",":
+        k = j + 1
+        while k < n and text[k] in " \t\r\n":
+            k += 1
+        if k >= n:
+            return True
+        # After `,` we must see the start of a key (`"`), an object/array
+        # close (trailing comma), or a fresh value. Anything else (a bare
+        # identifier, an operator, etc.) means this `"` is a literal inside
+        # the previous string, not its terminator.
+        return text[k] in _VALUE_STARTERS or text[k] in "}]"
+    return False
+
+
+def _escape_inner_string_quotes(text: str) -> str:
+    """Escape literal ``"`` characters that appear inside JSON string values.
+
+    The LLM is asked to quote source code in the ``evidence`` field. When the
+    quoted code itself contains ``"`` and the model forgets to escape it, the
+    JSON string boundary is broken — ``json.loads`` then fails with
+    "Expecting ',' delimiter" at the offending byte.
+
+    This walker scans the text tracking string state. A ``"`` while inside a
+    string is treated as a literal (rewritten to ``\\"``) unless what follows
+    it is consistent with a real JSON structural transition — see
+    ``_looks_like_terminator``. Already-escaped ``\\"`` and other backslash
+    escapes pass through untouched. The transform is a no-op on valid JSON.
+    """
+    out: list[str] = []
+    in_string = False
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        # Pass through any backslash escape verbatim so \" doesn't fool us into
+        # thinking the string ended.
+        if ch == "\\" and i + 1 < n:
+            out.append(ch)
+            out.append(text[i + 1])
+            i += 2
+            continue
+        if ch != '"':
+            out.append(ch)
+            i += 1
+            continue
+        if not in_string:
+            in_string = True
+            out.append(ch)
+            i += 1
+            continue
+        if _looks_like_terminator(text, i):
+            in_string = False
+            out.append(ch)
+        else:
+            out.append('\\"')
+        i += 1
+    return "".join(out)
+
+
 def parse_verdict(llm_output: str, provider: str = "unknown") -> Verdict:
     """
     Parse LLM JSON output into a typed Verdict.
@@ -166,7 +247,27 @@ def parse_verdict(llm_output: str, provider: str = "unknown") -> Verdict:
 
     try:
         data = json.loads(text)
+    except json.JSONDecodeError:
+        # Common failure: the LLM quoted source code in `evidence` without
+        # escaping inner `"` characters, prematurely terminating the string.
+        # Walk the text and escape literal quotes inside string values, retry.
+        repaired = _escape_inner_string_quotes(text)
+        try:
+            data = json.loads(repaired)
+            logger.warning(
+                "Recovered malformed LLM JSON by escaping unescaped inner quotes "
+                "(output length: %d chars)",
+                len(llm_output),
+            )
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.error(
+                "Failed to parse LLM verdict JSON: %s (output length: %d chars)",
+                e,
+                len(llm_output),
+            )
+            return Verdict.error(f"JSON parse failure: {e}")
 
+    try:
         # Enforce calibration rules from the system prompt
         raw_verdict = data.get("verdict", "ERROR")
         # Clamp confidence to [0, 1] — LLMs can hallucinate out-of-range or NaN values
@@ -211,7 +312,7 @@ def parse_verdict(llm_output: str, provider: str = "unknown") -> Verdict:
             provider=provider,
         )
 
-    except (json.JSONDecodeError, ValueError, KeyError) as e:
+    except (ValueError, KeyError) as e:
         logger.error(
             "Failed to parse LLM verdict JSON: %s (output length: %d chars)",
             e,
