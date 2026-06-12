@@ -40,6 +40,8 @@ permissions:
   pull-requests: write
   issues: write
   id-token: write
+  models: read            # GitHub Models API (GITHUB_TOKEN fallback LLM)
+  security-events: write  # SARIF upload to GitHub Code Scanning
 
 jobs:
   appsec-triage:
