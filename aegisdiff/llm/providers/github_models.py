@@ -41,6 +41,8 @@ class GitHubModelsProvider(LLMProvider):
     name = "github_models"
     model = "Llama-3.3-70B-Instruct"  # No namespace prefix — inference API uses bare model name
     max_context_tokens = 3_500  # ~3500 input + 1024 output ≈ 4500 total, safely under 8000
+    # Free tier RPM is undocumented and conservative — space requests out
+    min_request_interval = 5.0
 
     def __init__(self, github_token: str, model: str | None = None) -> None:
         self._token = github_token

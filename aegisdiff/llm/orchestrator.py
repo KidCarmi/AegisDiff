@@ -1,10 +1,15 @@
 """
-LLM Orchestrator — provider failover with exponential backoff.
+LLM Orchestrator — provider failover with rate-limit-aware pacing and backoff.
 
-Priority order: OpenRouter llama-3.3-70b:free → OpenRouter gemma-3-9b-it:free
-               → GitHub Models Llama-3.3-70B-Instruct (GITHUB_TOKEN fallback).
-On retryable errors (429, timeout, 5xx): exponential backoff + jitter, up to max_retries.
-On non-retryable errors: immediately rotate to the next provider.
+Priority order: OpenRouter llama-3.3-70b:free → OpenRouter gemma-3-27b-it:free
+               → Groq llama-3.3-70b-versatile → GitHub Models (GITHUB_TOKEN fallback).
+- Consecutive requests to the same provider are paced (min_request_interval)
+  so chunked scans don't trip per-minute free-tier limits in the first place.
+- On 429: cooldown honors the Retry-After header when present; a 429 caused by
+  daily quota exhaustion benches the key for the rest of the run.
+- On other retryable errors (timeout, 5xx): exponential backoff + jitter.
+- When every provider is cooling down: waits for the soonest recovery within a
+  bounded budget (instead of giving up after a single fixed sleep).
 If all providers are exhausted: raises RuntimeError.
 """
 
@@ -27,8 +32,45 @@ BACKOFF_MAX = 60.0
 BACKOFF_JITTER = 0.3
 
 
-_RATE_LIMIT_COOLDOWN = 65.0  # seconds to skip a provider after 429
+_RATE_LIMIT_COOLDOWN = 65.0  # default 429 cooldown when no Retry-After header
+_RATE_LIMIT_COOLDOWN_MAX = 900.0  # cap on honored Retry-After values
+_DAILY_QUOTA_COOLDOWN = 6 * 3600.0  # bench a key whose daily quota is exhausted
 _TIMEOUT_COOLDOWN = 30.0  # seconds to skip a provider after a read timeout
+
+# When every provider is cooling down, wait for the soonest recovery — bounded
+# by both a wall-clock budget and a cycle count per complete() call.
+_EXHAUSTED_WAIT_BUDGET = 300.0
+_MAX_WAIT_CYCLES = 5
+
+# Substrings identifying a 429 caused by a *daily* quota rather than a
+# per-minute one. Groq: "... on requests per day (RPD): Limit ...".
+# OpenRouter: "Rate limit exceeded: free-models-per-day".
+_DAILY_QUOTA_PHRASES = ("per day", "(rpd)", "(tpd)", "daily", "free-models-per-day")
+
+
+def _cooldown_from_429(exc: httpx.HTTPStatusError) -> float:
+    """
+    Pick a cooldown for a 429 response.
+
+    Daily-quota exhaustion benches the key for the rest of the run — retrying
+    it every minute can never succeed. Otherwise honor Retry-After (capped),
+    falling back to the default cooldown.
+    """
+    try:
+        body = exc.response.text[:1000].lower()
+        if any(phrase in body for phrase in _DAILY_QUOTA_PHRASES):
+            return _DAILY_QUOTA_COOLDOWN
+    except Exception:  # noqa: BLE001 — malformed body must never mask the 429
+        pass
+
+    try:
+        retry_after = exc.response.headers.get("retry-after")
+        if retry_after is not None:
+            return max(min(float(retry_after) + 1.0, _RATE_LIMIT_COOLDOWN_MAX), 1.0)
+    except (TypeError, ValueError, AttributeError):
+        pass
+
+    return _RATE_LIMIT_COOLDOWN
 
 
 class LLMOrchestrator:
@@ -37,11 +79,12 @@ class LLMOrchestrator:
 
     Usage::
 
-        orchestrator = LLMOrchestrator([GeminiProvider(key), GroqProvider(key)])
+        orchestrator = LLMOrchestrator([OpenRouterProvider(key), GroqProvider(key)])
         response = orchestrator.complete(request)
 
-    Cooldown tracking is persistent across complete() calls so that providers
-    which 429'd on chunk N are skipped on chunk N+1 without re-probing them.
+    Cooldown and pacing state is persistent across complete() calls so that a
+    provider which 429'd on chunk N is skipped on chunk N+1 without re-probing,
+    and chunk N+1 doesn't burst-fire into a per-minute rate limit.
     """
 
     def __init__(
@@ -56,6 +99,8 @@ class LLMOrchestrator:
         # Maps provider id() → monotonic timestamp when cooldown expires.
         # Survives across complete() calls (chunked analysis).
         self._cooldown_until: dict[int, float] = {}
+        # Maps provider id() → monotonic timestamp of the last request sent.
+        self._last_request_at: dict[int, float] = {}
 
     def _in_cooldown(self, provider: LLMProvider) -> bool:
         return time.monotonic() < self._cooldown_until.get(id(provider), 0.0)
@@ -64,27 +109,39 @@ class LLMOrchestrator:
         self._cooldown_until[id(provider)] = time.monotonic() + seconds
         logger.debug("Provider %s cooling down for %.0fs", provider.name, seconds)
 
+    def _pace(self, provider: LLMProvider) -> None:
+        """Sleep so consecutive requests to one provider respect its rate limit."""
+        interval = getattr(provider, "min_request_interval", 0.0)
+        if not isinstance(interval, (int, float)) or interval <= 0:
+            return
+        last = self._last_request_at.get(id(provider))
+        if last is None:
+            return
+        wait = interval - (time.monotonic() - last)
+        if wait > 0:
+            logger.debug("Pacing %s — sleeping %.1fs between requests", provider.name, wait)
+            time.sleep(wait)
+
     def complete(self, request: LLMRequest) -> LLMResponse:
         last_exc: Optional[Exception] = None
+        deadline = time.monotonic() + _EXHAUSTED_WAIT_BUDGET
 
-        # Two outer passes: first try all non-cooled-down providers; then (if
-        # every provider is still cooling down) sleep until the soonest expiry
-        # and try the whole list once more before giving up.
-        for full_pass in range(2):
-            if full_pass == 1:
-                # Find the soonest cooldown expiry and sleep until then (max 65s).
+        for wait_cycle in range(_MAX_WAIT_CYCLES + 1):
+            if wait_cycle > 0:
+                # Every provider failed or is cooling down. Wait for the
+                # soonest cooldown that expires within the remaining budget;
+                # if nothing will recover in time (e.g. all keys benched on
+                # daily quota), give up now instead of sleeping pointlessly.
                 now = time.monotonic()
-                soonest = min(
-                    (exp for exp in self._cooldown_until.values() if exp > now),
-                    default=now,
+                upcoming = [exp for exp in self._cooldown_until.values() if now < exp <= deadline]
+                if not upcoming:
+                    break
+                wait = min(upcoming) - now + 0.5
+                logger.warning(
+                    "All providers cooling down — sleeping %.0fs before retrying",
+                    wait,
                 )
-                wait = min(soonest - now + 0.5, 65.0)
-                if wait > 1.0:
-                    logger.warning(
-                        "All providers cooling down — sleeping %.0fs before retrying",
-                        wait,
-                    )
-                    time.sleep(wait)
+                time.sleep(wait)
 
             for provider in self._providers:
                 if self._in_cooldown(provider):
@@ -101,6 +158,8 @@ class LLMOrchestrator:
 
                 for attempt in range(1, self._max_retries + 1):
                     adapted = self._adapt_request(request, provider, context_scale)
+                    self._pace(provider)
+                    self._last_request_at[id(provider)] = time.monotonic()
                     try:
                         logger.info(
                             "LLM attempt %d/%d via %s (context scale %.0f%%)",
@@ -138,17 +197,24 @@ class LLMOrchestrator:
                             continue  # retry same provider with smaller context
 
                         # 429 = rate limited: mark cooldown and rotate immediately.
-                        # Don't waste time sleeping on a key that won't recover for ~60s.
+                        # Don't waste time sleeping on a key that won't recover soon.
                         if (
                             isinstance(exc, httpx.HTTPStatusError)
                             and exc.response.status_code == 429
                         ):
-                            logger.warning(
-                                "Rate limit (429) from %s — cooling down %.0fs, rotating",
-                                provider.name,
-                                _RATE_LIMIT_COOLDOWN,
-                            )
-                            self._set_cooldown(provider, _RATE_LIMIT_COOLDOWN)
+                            cooldown = _cooldown_from_429(exc)
+                            if cooldown >= _DAILY_QUOTA_COOLDOWN:
+                                logger.warning(
+                                    "Daily quota exhausted on %s — benching key for this run",
+                                    provider.name,
+                                )
+                            else:
+                                logger.warning(
+                                    "Rate limit (429) from %s — cooling down %.0fs, rotating",
+                                    provider.name,
+                                    cooldown,
+                                )
+                            self._set_cooldown(provider, cooldown)
                             break  # skip remaining retries for this provider
 
                         # Timeout: the provider accepted the connection but never

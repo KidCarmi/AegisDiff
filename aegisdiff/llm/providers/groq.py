@@ -43,6 +43,8 @@ class GroqProvider(LLMProvider):
     model = "llama-3.3-70b-versatile"
     # 128k context window; keep conservative to stay well under free-tier TPM limits
     max_context_tokens = 6_000
+    # Free tier allows 30 req/min per key (2s spacing)
+    min_request_interval = 2.0
 
     def __init__(self, api_key: str, model: str | None = None) -> None:
         self._api_key = api_key
